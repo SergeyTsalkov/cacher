@@ -1,0 +1,19 @@
+{
+    "name": "sergeytsalkov/cacher",
+    "type": "library",
+    "authors": [
+        {
+            "name": "Sergey Tsalkov",
+            "email": "stsalkov@gmail.com"
+        }
+    ],
+    "autoload": {
+        "classmap": [
+            "src/"
+        ]
+    },
+    "require": {
+        "sergeytsalkov/meekrodb": "^3.1",
+        "aws/aws-sdk-php": "3.*"
+    }
+}
