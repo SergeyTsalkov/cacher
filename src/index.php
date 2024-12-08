@@ -22,7 +22,7 @@ class CacherIndex {
     }
 
     if (count($tables) == 0) {
-      $structure_file = sprintf('%s/../structure-%s', __DIR__, $this->db->db_type());
+      $structure_file = sprintf('%s/../structure-%s', __DIR__, $this->db->dbType());
       $structure = file_get_contents($structure_file);
       $this->db->query($structure);
     }
@@ -56,5 +56,16 @@ class CacherIndex {
     return $this->db->queryFirstRow("SELECT * FROM items WHERE `key`=%s AND version=%s", $key, $version);
   }
 
+  function all() {
+    $results = $this->db->query("SELECT `key`, version FROM items ORDER BY `key`");
+    $items = [];
+    foreach ($results as $result) {
+      $key = $result['key'];
+      $current_version = $items[$key] ?? '';
+      $version = $result['version'];
+      $items[$key] = version_compare($version, $current_version) > 0 ? $version : $current_version;
+    }
+    return $items;
+  }
 
 }

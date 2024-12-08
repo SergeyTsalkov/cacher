@@ -50,6 +50,7 @@ class Cacher {
     $Manager->transfer();
 
     $this->remoteIndex->add($key, $version, $remote_path);
+    $this->say("Pushed $key ($version) to $remote_path");
   }
 
   function pull(string $key) {
@@ -78,6 +79,14 @@ class Cacher {
 
     $files = $this->list_files($local_path);
     $this->localIndex->add($key, $version, $local_path, $files);
+  }
+
+  function localinfo() {
+    return $this->localIndex->all();
+  }
+
+  function remoteinfo() {
+    return $this->remoteIndex->all();
   }
 
   private function list_files(string $basedir): array {
@@ -145,5 +154,12 @@ class Cacher {
     return join('/', $parts);
   }
 
+  function say(string ...$messages) {
+    $is_console = php_sapi_name() == 'cli';
+
+    if ($is_console) {
+      echo join(' ', $messages), "\n";
+    }
+  }
 
 }
