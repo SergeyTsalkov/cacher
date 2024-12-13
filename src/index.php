@@ -22,7 +22,7 @@ class CacherIndex {
     }
 
     if (count($tables) == 0) {
-      $structure_file = sprintf('%s/../structure-%s', __DIR__, $this->db->dbType());
+      $structure_file = sprintf('%s/../structure-%s.sql', __DIR__, $this->db->dbType());
       $structure = file_get_contents($structure_file);
       $this->db->query($structure);
     }
@@ -53,7 +53,25 @@ class CacherIndex {
     if (! $version) $version = $this->version($key);
     if (! $version) return;
 
-    return $this->db->queryFirstRow("SELECT * FROM items WHERE `key`=%s AND version=%s", $key, $version);
+    $row = $this->db->queryFirstRow("SELECT * FROM items WHERE `key`=%s AND version=%s", $key, $version);
+    if (! $row) return;
+
+    if (isset($row['files'])) {
+      $row['files'] = json_decode($row['files'], true);
+    }
+    return $row;
+  }
+  
+  // remove any other versions of this key, and add the new version
+  function update(string $key, string $version, string $path, array $files=[]) {
+    $this->db->startTransaction();
+    $this->delete($key);
+    $this->add($key, $version, $path, $files);
+    $this->db->commit();
+  }
+
+  function delete(string $key) {
+    $this->db->delete('items', ['key' => $key]);
   }
 
   function all() {

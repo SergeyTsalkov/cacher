@@ -1,4 +1,6 @@
 <?php
+namespace Cacher2;
+
 class ParsedCommandLine {
   private $flags = [];
   private $args = [];

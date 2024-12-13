@@ -3,6 +3,7 @@ class Cacher {
   private $s3;
   private $remoteIndex;
   private $localIndex;
+  private $installedIndex;
 
   function __construct() {
     $db = new MeekroDB(
@@ -22,9 +23,14 @@ class Cacher {
         ],
     ]);
 
+    $home = getenv('HOME');
+    if (!$home || !is_dir($home)) throw new Exception("Unable to determine HOME");
+
     $local_index_file = $this->path_join($this->const('CACHER_HOME'), '.cacher2');
+    $installed_index_file = $this->path_join($home, '.cacher2');
     $this->remoteIndex = new CacherIndex($db);
     $this->localIndex = new CacherIndex($local_index_file);
+    $this->installedIndex = new CacherIndex($installed_index_file);
   }
 
   function push(string $path, string $key, string $version=null) {
@@ -87,6 +93,62 @@ class Cacher {
 
   function remoteinfo() {
     return $this->remoteIndex->all();
+  }
+
+  function install(string $key, string $path) {
+    if (! is_dir($path)) {
+      throw new Exception("$path is not a directory");
+    }
+    if (! is_writable($path)) {
+      throw new Exception("$path is not writable");
+    }
+
+    $local = $this->localIndex->get($key);
+    $installed = $this->installedIndex->get($key);
+    if (! $local) {
+      throw new Exception("Not available in local cache: $key");
+    }
+    if ($installed) {
+      if ($installed['version'] == $local['version']) {
+        $this->say("Already installed: $key ({$installed['version']})");
+        return;
+      }
+
+      // remove any files that are part of installed, but not part of local
+      $installed_files = $installed['files'];
+      $local_files = $local['files'];
+      $files_to_remove = array_diff($installed_files, $local_files);
+
+      if ($files_to_remove) {
+        $this->say("Removing old files from $path: ", join(', ', $files_to_remove));
+        foreach ($files_to_remove as $file) {
+          @unlink($this->path_join($path, $file));
+        }
+      }
+    }
+
+    shell_exec('rsync -a ' . escapeshellarg($local['path'] . '/') . ' ' . escapeshellarg($path));
+    $this->installedIndex->update($key, $local['version'], $path, $local['files']);
+    $this->say("Installed $key to $path");
+  }
+
+  function uninstall(string $key) {
+    $installed = $this->installedIndex->get($key);
+    if (! $installed) {
+      throw new Exception("Not installed: $key");
+    }
+
+    $files = $installed['files'];
+    foreach ($files as $file) {
+      @unlink($this->path_join($installed['path'], $file));
+    }
+
+    $this->installedIndex->delete($key);
+    $this->say("Uninstalled $key");
+  }
+
+  function installed() {
+    return $this->installedIndex->all();
   }
 
   private function list_files(string $basedir): array {
