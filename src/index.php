@@ -41,12 +41,17 @@ class CacherIndex {
     $this->db->insert('items', $item);
   }
 
-  function version(string $key) {
+  function versions(string $key) {
     $versions = $this->db->queryFirstColumn("SELECT version FROM items WHERE `key`=%s", $key);
     if (! $versions) return;
 
     usort($versions, fn($a, $b) => version_compare($b, $a));
-    return $versions[0];
+    return $versions;
+  }
+
+  function version(string $key) {
+    $versions = $this->versions($key);
+    return $versions ? $versions[0] : null;
   }
 
   function get(string $key, ?string $version=null) {
@@ -70,8 +75,12 @@ class CacherIndex {
     $this->db->commit();
   }
 
-  function delete(string $key) {
-    $this->db->delete('items', ['key' => $key]);
+  function delete(string $key, ?string $version=null) {
+    if ($version) {
+      $this->db->delete('items', ['key' => $key, 'version' => $version]);
+    } else {
+      $this->db->delete('items', ['key' => $key]);
+    }
   }
 
   function all(string $match=null) {
@@ -92,6 +101,39 @@ class CacherIndex {
     }
 
     return $items;
+  }
+
+  // return all items that are at least 24 hours older than the newest version of the same key
+  function old() {
+    $results = $this->db->query("SELECT * FROM items ORDER BY `key`");
+    
+    $items = [];
+    $newest = [];
+    
+    // Group by key and find newest version
+    foreach ($results as $result) {
+      $items[$result['key']][] = $result;
+    }
+    foreach ($items as $key => $versions) {
+      usort($versions, fn($a, $b) => version_compare($b['version'], $a['version']));
+      $newest[$key] = $versions[0];
+    }
+
+    $old_items = [];
+    foreach ($items as $key => $versions) {
+      $newest_time = strtotime($newest[$key]['created_at']);
+      
+      foreach ($versions as $version) {
+        if ($version === $newest[$key]) continue;
+        
+        $version_time = strtotime($version['created_at']);
+        if ($newest_time - $version_time >= 24 * 60 * 60) {
+          $old_items[] = $version;
+        }
+      }
+    }
+
+    return $old_items;
   }
 
 }

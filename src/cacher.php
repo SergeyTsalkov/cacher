@@ -72,7 +72,8 @@ class Cacher {
     $local_path = $this->local_path($key, $version);
 
     if ($exists = $this->localIndex->get($key, $version)) {
-      throw new Exception("Local cache already has $key ($version) at {$exists['path']}");
+      $this->say("Local cache already has $key ($version)");
+      return;
     }
 
     if (is_dir($local_path) || file_exists($local_path)) {
@@ -86,6 +87,37 @@ class Cacher {
 
     $files = $this->list_files($local_path);
     $this->localIndex->add($key, $version, $local_path, $files);
+    $this->say("Pulled $key ($version)");
+  }
+
+  function deletelocal(string $key, string $version=null) {
+    if (is_null($version)) {
+      $versions = $this->localIndex->versions($key);
+      if (! $versions) {
+        throw new Exception("Item $key does not exist in local cache");
+      }
+      foreach ($versions as $version) {
+        $this->deletelocal($key, $version);
+      }
+      return;
+    }
+
+    $item = $this->localIndex->get($key, $version);
+    if (! $item) {
+      throw new Exception("Item $key ($version) does not exist in local cache");
+    }
+
+    $fs = new Filesystem();
+    $fs->remove($item['path']);
+    $this->localIndex->delete($key, $version);
+    $this->say("Deleted $key ($version) from local cache");
+  }
+
+  function cleanlocal() {
+    $this->say("Cleaning local cache..");
+    foreach ($this->localIndex->old() as $item) {
+      $this->deletelocal($item['key'], $item['version']);
+    }
   }
 
   function localinfo(string $match=null) {
