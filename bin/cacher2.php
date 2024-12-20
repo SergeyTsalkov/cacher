@@ -6,7 +6,7 @@ require_once __DIR__ . '/../vendor/autoload.php';
 $Cmd = new ParsedCommandLine($argv);
 $cmd = $Cmd->arg(0);
 
-$valid_commands = ['push', 'pull', 'info', 'install', 'uninstall', 'installed'];
+$valid_commands = ['push', 'pull', 'local', 'remote', 'installed', 'install', 'uninstall'];
 if (in_array($cmd, $valid_commands)) {
   $func = "Cacher2\\$cmd";
   $func($Cmd);
@@ -46,25 +46,69 @@ function pull(ParsedCommandLine $Cmd) {
   $Cacher->pull($key);
 }
 
-function info(ParsedCommandLine $Cmd) {
+function _local(string $match=null): array {
   $Cacher = new \Cacher();
-  $local = $Cacher->localInfo();
-  $remote = $Cacher->remoteInfo();
-  foreach ($local as $key => $version) {
-    $remote_version = $remote[$key] ?? null;
-    if (is_null($remote_version)) $status = 'missing from remote';
-    else if ($remote_version == $version) $status = 'up-to-date';
-    else $status = 'needs update';
+  $local = $Cacher->localInfo($match);
+  $remote = $Cacher->remoteInfo($match);
+  $results = [];
+  foreach ($local as $key => $local_item) {
+    $remote_item = $remote[$key] ?? null;
 
-    echo sprintf("%s (%s, %s)\n", $key, $version, $status);
+    $results[$key] = [
+      'local_version' => $local_item['version'],
+      'remote_version' => $remote_item['version'] ?? null,
+    ];
+  }
+  return $results;
+}
+
+function _remote(string $match=null): array {
+  $Cacher = new \Cacher();
+  $remote = $Cacher->remoteInfo($match);
+  $results = [];
+  foreach ($remote as $key => $remote_item) {
+    $results[$key] = [
+      'version' => $remote_item['version'],
+    ];
+  }
+  return $results;
+}
+
+function local(ParsedCommandLine $Cmd) {
+  $results = _local($Cmd->arg(1));
+  if ($Cmd->flag('json')) {
+    echo json_encode($results, JSON_PRETTY_PRINT) . "\n";
+  } else {
+    foreach ($results as $key => $item) {
+      if (is_null($item['remote_version'])) {
+        $status = 'missing from remote';
+      } else if ($item['local_version'] == $item['remote_version']) {
+        $status = 'up-to-date';
+      } else {
+        $status = 'needs update';
+      }
+
+      echo sprintf("%s (%s, %s)\n", $key, $item['local_version'], $status);
+    }
+  }
+}
+
+function remote(ParsedCommandLine $Cmd) {
+  $results = _remote($Cmd->arg(1));
+  if ($Cmd->flag('json')) {
+    echo json_encode($results, JSON_PRETTY_PRINT) . "\n";
+  } else {
+    foreach ($results as $key => $item) {
+      echo sprintf("%s (%s)\n", $key, $item['version']);
+    }
   }
 }
 
 function installed(ParsedCommandLine $Cmd) {
   $Cacher = new \Cacher();
   $installed = $Cacher->installed();
-  foreach ($installed as $key => $version) {
-    echo sprintf("%s (%s)\n", $key, $version);
+  foreach ($installed as $key => $item) {
+    echo sprintf("%s (%s): %s\n", $key, $item['version'], $item['path']);
   }
 }
 
@@ -73,10 +117,11 @@ function help() {
   echo "Commands:\n";
   echo "  push <path> <key> [version]\n";
   echo "  pull <key>\n";
+  echo "  local\n";
+  echo "  remote\n";
+  echo "  installed\n";
   echo "  install <key> <path>\n";
   echo "  uninstall <key>\n";
-  echo "  installed\n";
-  echo "  info\n";
   die();
 }
 

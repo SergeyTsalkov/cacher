@@ -88,12 +88,12 @@ class Cacher {
     $this->localIndex->add($key, $version, $local_path, $files);
   }
 
-  function localinfo() {
-    return $this->localIndex->all();
+  function localinfo(string $match=null) {
+    return $this->localIndex->all($match);
   }
 
-  function remoteinfo() {
-    return $this->remoteIndex->all();
+  function remoteinfo(string $match=null) {
+    return $this->remoteIndex->all($match);
   }
 
   function install(string $key, string $path) {

@@ -74,15 +74,23 @@ class CacherIndex {
     $this->db->delete('items', ['key' => $key]);
   }
 
-  function all() {
-    $results = $this->db->query("SELECT `key`, version FROM items ORDER BY `key`");
+  function all(string $match=null) {
+    if ($match) {
+      $results = $this->db->query("SELECT * FROM items WHERE `key` LIKE %s ORDER BY `key`", $match . '%');
+    } else {
+      $results = $this->db->query("SELECT * FROM items ORDER BY `key`");
+    }
+
     $items = [];
     foreach ($results as $result) {
-      $key = $result['key'];
-      $current_version = $items[$key] ?? '';
-      $version = $result['version'];
-      $items[$key] = version_compare($version, $current_version) > 0 ? $version : $current_version;
+      $items[$result['key']][] = $result;
     }
+
+    foreach ($items as $key => $versions) {
+      usort($versions, fn($a, $b) => version_compare($b['version'], $a['version']));
+      $items[$key] = $versions[0];
+    }
+
     return $items;
   }
 
