@@ -2,3 +2,4 @@
 /composer.lock
 .DS_store
 .dev
+test.php

@@ -43,8 +43,6 @@ class CacherIndex {
 
   function versions(string $key) {
     $versions = $this->db->queryFirstColumn("SELECT version FROM items WHERE `key`=%s", $key);
-    if (! $versions) return;
-
     usort($versions, fn($a, $b) => version_compare($b, $a));
     return $versions;
   }

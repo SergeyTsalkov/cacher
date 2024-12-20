@@ -120,6 +120,32 @@ class Cacher {
     }
   }
 
+  function deleteremote(string $key, string $version=null) {
+    if (is_null($version)) {
+      $versions = $this->remoteIndex->versions($key);
+      if (! $versions) {
+        throw new Exception("Item $key does not exist in remote cache");
+      }
+      foreach ($versions as $version) {
+        $this->deleteremote($key, $version);
+      }
+      return;
+    }
+
+    // trailing slash is important so that path/1 doesn't match path/11
+    $remote_path = $this->remote_path($key, $version, true) . '/';
+    $this->s3->deleteMatchingObjects($this->const('CACHER_R2_BUCKET'), $remote_path);
+    $this->remoteIndex->delete($key, $version);
+    $this->say("Deleted $key ($version) from remote cache");
+  }
+
+  function cleanremote() {
+    $this->say("Cleaning remote cache..");
+    foreach ($this->remoteIndex->old() as $item) {
+      $this->deleteremote($item['key'], $item['version']);
+    }
+  }
+
   function localinfo(string $match=null) {
     return $this->localIndex->all($match);
   }
@@ -215,9 +241,12 @@ class Cacher {
     return $path;
   }
 
-  private function remote_path(string $key, string $version) {
+  private function remote_path(string $key, string $version, bool $use_simple=false) {
+    $simple_path = $this->path_join($this->item2path($key), $version);
+    if ($use_simple) return $simple_path;
+
     $cache_path = sprintf('s3://%s/', $this->const('CACHER_R2_BUCKET'));
-    return $this->path_join($cache_path, $this->item2path($key), $version);
+    return $this->path_join($cache_path, $simple_path);
   }
 
   private function local_path(string $key, string $version) {

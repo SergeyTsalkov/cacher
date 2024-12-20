@@ -6,7 +6,7 @@ require_once __DIR__ . '/../vendor/autoload.php';
 $Cmd = new ParsedCommandLine($argv);
 $cmd = $Cmd->arg(0);
 
-$valid_commands = ['push', 'pull', 'local', 'remote', 'installed', 'install', 'uninstall', 'cleanlocal'];
+$valid_commands = ['push', 'pull', 'local', 'remote', 'installed', 'install', 'uninstall', 'cleanlocal', 'cleanremote'];
 if (in_array($cmd, $valid_commands)) {
   $func = "Cacher2\\$cmd";
   $func($Cmd);
@@ -111,6 +111,11 @@ function cleanlocal(ParsedCommandLine $Cmd) {
   $Cacher->cleanlocal();
 }
 
+function cleanremote(ParsedCommandLine $Cmd) {
+  $Cacher = new \Cacher();
+  $Cacher->cleanremote();
+}
+
 function installed(ParsedCommandLine $Cmd) {
   $Cacher = new \Cacher();
   $installed = $Cacher->installed();
@@ -130,6 +135,7 @@ function help() {
   echo "  install <key> <path>\n";
   echo "  uninstall <key>\n";
   echo "  cleanlocal\n";
+  echo "  cleanremote\n";
   die();
 }
 
