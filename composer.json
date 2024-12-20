@@ -17,6 +17,12 @@
     },
     "require": {
         "sergeytsalkov/meekrodb": "^3.1.3",
-        "aws/aws-sdk-php": "3.*"
+        "aws/aws-sdk-php": "3.*",
+        "symfony/filesystem": "*"
+    },
+    "config": {
+        "platform": {
+            "php": "7.4.33"
+        }
     }
 }

@@ -1,4 +1,6 @@
 <?php
+use Symfony\Component\Filesystem\Filesystem;
+
 class Cacher {
   private $s3;
   private $remoteIndex;
@@ -72,11 +74,10 @@ class Cacher {
     if ($exists = $this->localIndex->get($key, $version)) {
       throw new Exception("Local cache already has $key ($version) at {$exists['path']}");
     }
-    if (is_dir($local_path)) {
-      throw new Exception("Directory already exists: $local_path");
-    }
-    if (file_exists($local_path)) {
-      throw new Exception("File exists where we wanted to make a directory: $local_path");
+
+    if (is_dir($local_path) || file_exists($local_path)) {
+      $fs = new Filesystem();
+      $fs->remove($local_path);
     }
 
     mkdir($local_path, 0755, true);
