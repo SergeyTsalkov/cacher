@@ -24,9 +24,6 @@ class CacherIndex {
     }
 
     $tables = $this->db->tableList();
-    if (count($tables) > 2) {
-      throw new Exception("More than two tables?!? Database seems corrupted!");
-    }
     if (count($tables) == 0) {
       $structure_file = sprintf('%s/../structure-%s.sql', __DIR__, $this->db->dbType());
       $structure = file_get_contents($structure_file);
@@ -155,6 +152,10 @@ class CacherIndex {
     }
 
     return $old_items;
+  }
+
+  function pdo() {
+    return $this->db->get();
   }
 
 }

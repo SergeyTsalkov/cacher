@@ -2,13 +2,13 @@
 use Symfony\Component\Filesystem\Filesystem;
 use Symfony\Component\Lock\LockFactory;
 use Symfony\Component\Lock\Store\SemaphoreStore;
+use Symfony\Component\Lock\Store\PdoStore;
 
 // TODO: 
 // * if we have a username, we must also be root and the username must be real
 // * sudo to username when installing (in production)
 // * install by symlink
 // * copy (install without mentioning in database)
-// * use sqlite for locking
 // * use touch()
 
 class Cacher {
@@ -318,7 +318,7 @@ class Cacher {
   }
 
   private function lock(string $name) {
-    $Factory = new LockFactory(new SemaphoreStore());
+    $Factory = new LockFactory(new PdoStore($this->localIndex->pdo()));
     $Lock = $Factory->createLock($name);
     $Lock->acquire(true);
     return $Lock;
