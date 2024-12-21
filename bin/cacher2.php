@@ -5,29 +5,46 @@ require_once __DIR__ . '/../vendor/autoload.php';
 
 $Cmd = new ParsedCommandLine($argv);
 $cmd = $Cmd->arg(0);
+$cmd = preg_replace('/[^a-z]/', '', $cmd);
+$func = "Cacher2\\$cmd";
 
-$valid_commands = ['push', 'pull', 'local', 'remote', 'installed', 'install', 'uninstall', 'cleanlocal', 'cleanremote'];
-if (in_array($cmd, $valid_commands)) {
-  $func = "Cacher2\\$cmd";
+if ($cmd && is_callable($func)) {
   $func($Cmd);
 } else {
   help();
 }
 
 function install(ParsedCommandLine $Cmd) {
-  list($key, $path) = $Cmd->args(1, 2);
-  require_args($key, $path);
+  list($username, $path) = $Cmd->args(1, 2);
+  $keys = $Cmd->args(3);
+  require_args($username, $path, $keys[0]);
 
-  $Cacher = new \Cacher();
-  $Cacher->install($key, $path);
+  $Cacher = new \Cacher($username);
+
+  foreach ($keys as $key) {
+    $Cacher->install($key, $path);
+  }
 }
 
 function uninstall(ParsedCommandLine $Cmd) {
-  list($key) = $Cmd->args(1);
-  require_args($key);
+  $username = $Cmd->arg(1);
+  $keys = $Cmd->args(2);
+  require_args($username, $keys[0]);
+
+  $Cacher = new \Cacher($username);
+  foreach ($keys as $key) {
+    $Cacher->uninstall($key);
+  }
+}
+
+function deletelocal(ParsedCommandLine $Cmd) {
+  $items = $Cmd->args(1);
+  require_args($items[0]);
 
   $Cacher = new \Cacher();
-  $Cacher->uninstall($key);
+  foreach ($items as $item) {
+    $Cacher->deletelocal($item);
+  }
 }
 
 function push(ParsedCommandLine $Cmd) {
@@ -76,6 +93,20 @@ function _remote(string $match=null): array {
   return $results;
 }
 
+function _installed(string $username): array {
+  $Cacher = new \Cacher($username);
+  $installed = $Cacher->installed();
+
+  $results = [];
+  foreach ($installed as $key => $item) {
+    $results[$key] = [
+      'version' => $item['version'],
+      'path' => $item['path'],
+    ];
+  }
+  return $results;
+}
+
 function local(ParsedCommandLine $Cmd) {
   $results = _local($Cmd->arg(1));
   if ($Cmd->flag('json')) {
@@ -117,25 +148,34 @@ function cleanremote(ParsedCommandLine $Cmd) {
 }
 
 function installed(ParsedCommandLine $Cmd) {
-  $Cacher = new \Cacher();
-  $installed = $Cacher->installed();
-  foreach ($installed as $key => $item) {
-    echo sprintf("%s (%s): %s\n", $key, $item['version'], $item['path']);
+  $username = $Cmd->arg(1);
+  require_args($username);
+
+  $installed = _installed($username);
+
+  if ($Cmd->flag('json')) {
+    echo json_encode($installed, JSON_PRETTY_PRINT) . "\n";
+  } else {
+    foreach ($installed as $key => $item) {
+      echo sprintf("%s (%s): %s\n", $key, $item['version'], $item['path']);
+    }
   }
+
+  
 }
 
 function help() {
   echo "Usage: cacher2 <command> [options]\n";
   echo "Commands:\n";
-  echo "  push <path> <key> [version]\n";
-  echo "  pull <key>\n";
-  echo "  local\n";
-  echo "  remote\n";
-  echo "  installed\n";
-  echo "  install <key> <path>\n";
-  echo "  uninstall <key>\n";
-  echo "  cleanlocal\n";
-  echo "  cleanremote\n";
+  echo "  push <path> <key> [version] -- push new item to remote cache\n";
+  echo "  pull <key1> [key2] ... -- pull item from remote to local cache\n";
+  echo "  local [--json] -- list local cache items\n";
+  echo "  remote [--json] -- list remote cache items\n";
+  echo "  install <username> <path> <key1> [key2] ... -- install item from local cache\n";
+  echo "  uninstall <username> <key1> [key2] ... -- uninstall item from local cache\n";
+  echo "  installed [--json] <username> -- list installed items\n";
+  echo "  cleanlocal -- delete old local items\n";
+  echo "  cleanremote -- delete old remote items\n";
   die();
 }
 

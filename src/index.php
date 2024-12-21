@@ -1,8 +1,15 @@
 <?php
 class CacherIndex {
   private $db;
+  private ?string $username=null;
+  private string $table='items';
 
-  function __construct($handle) {
+  function __construct($handle, ?string $username=null) {
+    if ($username) {
+      $this->username = $username;
+      $this->table = 'installed';
+    }
+    
     if ($handle instanceof MeekroDB) {
       $this->db = $handle;
     }
@@ -17,14 +24,17 @@ class CacherIndex {
     }
 
     $tables = $this->db->tableList();
-    if (count($tables) > 1) {
-      throw new Exception("More than one table?!? Database seems corrupted!");
+    if (count($tables) > 2) {
+      throw new Exception("More than two tables?!? Database seems corrupted!");
     }
-
     if (count($tables) == 0) {
       $structure_file = sprintf('%s/../structure-%s.sql', __DIR__, $this->db->dbType());
       $structure = file_get_contents($structure_file);
-      $this->db->query($structure);
+      $queries = array_filter(explode(';', $structure));
+
+      foreach ($queries as $query) {
+        $this->db->query($query);
+      }
     }
   }
 
@@ -38,13 +48,43 @@ class CacherIndex {
       $item['files'] = json_encode($files);
     }
 
-    $this->db->insert('items', $item);
+    if ($this->username) {
+      $item['username'] = $this->username;
+      $this->db->replace($this->table, $item);
+    } else {
+      $this->db->insert($this->table, $item);
+    }
+  }
+
+  function get(string $key, ?string $version=null) {
+    $results = $this->getall($key, $version);
+    return $results ? $results[0] : null;
+  }
+
+  function getall(string $key, ?string $version=null): array {
+    $match = [];
+    if ($this->username) $match['username'] = $this->username;
+    $match['key'] = $key;
+    if ($version) $match['version'] = $version;
+
+    $results = $this->db->query("SELECT * FROM %b WHERE %ha", $this->table, $match);
+    if (! $results) return [];
+
+    foreach ($results as &$row) {
+      if (isset($row['files'])) {
+        $row['files'] = json_decode($row['files'], true);
+      }
+    }
+
+    usort($results, fn($a, $b) => version_compare($b['version'], $a['version']));
+    return $results;
   }
 
   function versions(string $key) {
-    $versions = $this->db->queryFirstColumn("SELECT version FROM items WHERE `key`=%s", $key);
-    usort($versions, fn($a, $b) => version_compare($b, $a));
-    return $versions;
+    $items = $this->getall($key);
+    if (! $items) return [];
+
+    return array_map(fn($item) => $item['version'], $items);
   }
 
   function version(string $key) {
@@ -52,42 +92,21 @@ class CacherIndex {
     return $versions ? $versions[0] : null;
   }
 
-  function get(string $key, ?string $version=null) {
-    if (! $version) $version = $this->version($key);
-    if (! $version) return;
-
-    $row = $this->db->queryFirstRow("SELECT * FROM items WHERE `key`=%s AND version=%s", $key, $version);
-    if (! $row) return;
-
-    if (isset($row['files'])) {
-      $row['files'] = json_decode($row['files'], true);
-    }
-    return $row;
-  }
-  
-  // remove any other versions of this key, and add the new version
-  function update(string $key, string $version, string $path, array $files=[]) {
-    $this->db->startTransaction();
-    $this->delete($key);
-    $this->add($key, $version, $path, $files);
-    $this->db->commit();
-  }
-
   function delete(string $key, ?string $version=null) {
-    if ($version) {
-      $this->db->delete('items', ['key' => $key, 'version' => $version]);
-    } else {
-      $this->db->delete('items', ['key' => $key]);
-    }
+    $match = [];
+    if ($this->username) $match['username'] = $this->username;
+    $match['key'] = $key;
+    if ($version) $match['version'] = $version;
+
+    $this->db->delete($this->table, $match);
   }
 
-  function all(string $match=null) {
-    if ($match) {
-      $results = $this->db->query("SELECT * FROM items WHERE `key` LIKE %s ORDER BY `key`", $match . '%');
-    } else {
-      $results = $this->db->query("SELECT * FROM items ORDER BY `key`");
-    }
+  function search(string $match=null) {
+    $Where = new WhereClause('and');
+    if ($this->username) $Where->add('username=%s', $this->username);
+    if ($match) $Where->add('`key` LIKE %s', $match . '%');
 
+    $results = $this->db->query("SELECT * FROM %b WHERE %l ORDER BY `key`", $this->table, $Where);
     $items = [];
     foreach ($results as $result) {
       $items[$result['key']][] = $result;
@@ -103,7 +122,11 @@ class CacherIndex {
 
   // return all items that are at least 24 hours older than the newest version of the same key
   function old() {
-    $results = $this->db->query("SELECT * FROM items ORDER BY `key`");
+    $Where = new WhereClause('and');
+    if ($this->username) {
+      $Where->add('username=%s', $this->username);
+    }
+    $results = $this->db->query("SELECT * FROM %b WHERE %l ORDER BY `key`", $this->table, $Where);
     
     $items = [];
     $newest = [];

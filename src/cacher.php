@@ -1,13 +1,24 @@
 <?php
 use Symfony\Component\Filesystem\Filesystem;
+use Symfony\Component\Lock\LockFactory;
+use Symfony\Component\Lock\Store\SemaphoreStore;
+
+// TODO: 
+// * if we have a username, we must also be root and the username must be real
+// * sudo to username when installing (in production)
+// * install by symlink
+// * copy (install without mentioning in database)
+// * use sqlite for locking
+// * use touch()
 
 class Cacher {
   private $s3;
+  private ?string $username;
   private $remoteIndex;
   private $localIndex;
   private $installedIndex;
 
-  function __construct() {
+  function __construct(?string $username=null) {
     $db = new MeekroDB(
       $this->const('CACHER_DB_DSN'), 
       $this->const('CACHER_DB_USER'), 
@@ -29,10 +40,21 @@ class Cacher {
     if (!$home || !is_dir($home)) throw new Exception("Unable to determine HOME");
 
     $local_index_file = $this->path_join($this->const('CACHER_HOME'), '.cacher2');
-    $installed_index_file = $this->path_join($home, '.cacher2');
     $this->remoteIndex = new CacherIndex($db);
     $this->localIndex = new CacherIndex($local_index_file);
-    $this->installedIndex = new CacherIndex($installed_index_file);
+
+    if ($username) {
+      $this->username = $username;
+      $this->installedIndex = new CacherIndex($local_index_file, $username);
+    }
+  }
+
+  function localUpToDate(string $key) {
+    $remote = $this->remoteIndex->get($key);
+    $local = $this->localIndex->get($key);
+
+    if (!$local || !$remote) return false;
+    return $local['version'] == $remote['version'];
   }
 
   function push(string $path, string $key, string $version=null) {
@@ -62,6 +84,8 @@ class Cacher {
   }
 
   function pull(string $key) {
+    $Lock = $this->lock("key:$key");
+
     $latest = $this->remoteIndex->get($key);
     if (! $latest) {
       throw new Exception("Item $key does not exist in the cache");
@@ -147,19 +171,29 @@ class Cacher {
   }
 
   function localinfo(string $match=null) {
-    return $this->localIndex->all($match);
+    return $this->localIndex->search($match);
   }
 
   function remoteinfo(string $match=null) {
-    return $this->remoteIndex->all($match);
+    return $this->remoteIndex->search($match);
   }
 
   function install(string $key, string $path) {
+    if (! $this->username) {
+      throw new Exception("username is missing");
+    }
+
+    $Lock = $this->lock("username:{$this->username}");
+
     if (! is_dir($path)) {
       throw new Exception("$path is not a directory");
     }
     if (! is_writable($path)) {
       throw new Exception("$path is not writable");
+    }
+
+    if (! $this->localUpToDate($key)) {
+      $this->pull($key);
     }
 
     $local = $this->localIndex->get($key);
@@ -187,11 +221,16 @@ class Cacher {
     }
 
     shell_exec('rsync -a ' . escapeshellarg($local['path'] . '/') . ' ' . escapeshellarg($path));
-    $this->installedIndex->update($key, $local['version'], $path, $local['files']);
+    $this->installedIndex->add($key, $local['version'], $path, $local['files']);
     $this->say("Installed $key to $path");
   }
 
   function uninstall(string $key) {
+    if (! $this->username) {
+      throw new Exception("username is missing");
+    }
+    $Lock = $this->lock("username:{$this->username}");
+
     $installed = $this->installedIndex->get($key);
     if (! $installed) {
       throw new Exception("Not installed: $key");
@@ -207,7 +246,7 @@ class Cacher {
   }
 
   function installed() {
-    return $this->installedIndex->all();
+    return $this->installedIndex->search();
   }
 
   private function list_files(string $basedir): array {
@@ -276,6 +315,13 @@ class Cacher {
     }
 
     return join('/', $parts);
+  }
+
+  private function lock(string $name) {
+    $Factory = new LockFactory(new SemaphoreStore());
+    $Lock = $Factory->createLock($name);
+    $Lock->acquire(true);
+    return $Lock;
   }
 
   function say(string ...$messages) {
