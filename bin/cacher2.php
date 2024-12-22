@@ -5,7 +5,7 @@ require_once __DIR__ . '/../vendor/autoload.php';
 
 $Cmd = new ParsedCommandLine($argv);
 $cmd = $Cmd->arg(0);
-$cmd = preg_replace('/[^a-z]/', '', $cmd);
+$cmd = preg_replace('/[^a-z]/', '', strval($cmd));
 $func = "Cacher2\\$cmd";
 
 if ($cmd && is_callable($func)) {
@@ -35,6 +35,14 @@ function uninstall(ParsedCommandLine $Cmd) {
   foreach ($keys as $key) {
     $Cacher->uninstall($key);
   }
+}
+
+function upgrade(ParsedCommandLine $Cmd) {
+  $username = $Cmd->arg(1);
+  require_args($username);
+
+  $Cacher = new \Cacher($username);
+  $Cacher->upgrade();
 }
 
 function deletelocal(ParsedCommandLine $Cmd) {
@@ -173,9 +181,11 @@ function help() {
   echo "  remote [--json] -- list remote cache items\n";
   echo "  install <username> <path> <key1> [key2] ... -- install item from local cache\n";
   echo "  uninstall <username> <key1> [key2] ... -- uninstall item from local cache\n";
+  echo "  upgrade <username> -- upgrade all installed items\n";
   echo "  installed [--json] <username> -- list installed items\n";
   echo "  cleanlocal -- delete old local items\n";
   echo "  cleanremote -- delete old remote items\n";
+  echo "  deletelocal <key1> [key2] ... - delete items from local cache\n";
   die();
 }
 

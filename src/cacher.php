@@ -5,10 +5,10 @@ use Symfony\Component\Lock\Store\SemaphoreStore;
 use Symfony\Component\Lock\Store\PdoStore;
 
 // TODO: 
-// * if we have a username, we must also be root and the username must be real
 // * install by symlink
 // * copy (install without mentioning in database)
-// * user upgrade command -- upgrades all installed packages; don't let "install" work on already-installed packages
+// * deleteremote command (optionally with version)
+// * properly handle event where higher version vanishes upstream
 
 class Cacher {
   private $s3;
@@ -178,32 +178,31 @@ class Cacher {
     return $this->remoteIndex->search($match);
   }
 
-  function install(string $key, string $path) {
-    $Lock = $this->lock("username:{$this->username}");
-
-    if (! is_dir($path)) {
-      throw new Exception("$path is not a directory");
+  // used by both install and upgrade
+  private function _install(string $key, ?string $path=null) {
+    $installed = $this->installedIndex->get($key);
+    if ($installed) {
+      $path = $installed['path'];
     }
-    if (! is_writable($path)) {
-      throw new Exception("$path is not writable");
+    if (!$path) {
+      throw new Exception("Path not specified");
+    }
+    if (!is_dir($path) || !is_writable($path)) {
+      throw new Exception("Path doesn't look valid: $path");
     }
 
     if (! $this->localUpToDate($key)) {
       $this->pull($key);
     }
-
     $local = $this->localIndex->get($key);
-    $installed = $this->installedIndex->get($key);
     if (! $local) {
-      throw new Exception("Not available in local cache: $key");
+      throw new Exception("Unable to find: $key");
     }
+
     if ($installed) {
       if ($installed['version'] == $local['version']) {
-        $this->say("Already installed: $key ({$installed['version']})");
+        $this->say("Already latest version: $key ({$installed['version']})");
         return;
-      }
-      if ($installed['path'] != $path) {
-        throw new Exception("Already installed in $path, you can't specify a different path");
       }
 
       // remove any files that are part of installed, but not part of local
@@ -221,7 +220,35 @@ class Cacher {
     $this->localIndex->touch($key, $local['version']);
     $this->sudo($this->username, 'rsync', ['-a', $local['path'] . '/', $path]);
     $this->installedIndex->add($key, $local['version'], $path, $local['files']);
-    $this->say("Installed $key to $path");
+    $this->say("Installed $key ({$local['version']}) to $path");
+  }
+
+  function install(string $key, string $path) {
+    $Lock = $this->lock("username:{$this->username}");
+
+    $installed = $this->installedIndex->get($key);
+    if ($installed) {
+      throw new Exception("Already installed: $key");
+    }
+
+    $this->_install($key, $path);
+  }
+
+  function upgrade(?string $key=null) {
+    if (! $key) {
+      foreach ($this->installed() as $item) {
+        $this->upgrade($item['key']);
+      }
+      return;
+    }
+
+    $Lock = $this->lock("username:{$this->username}");
+    $installed = $this->installedIndex->get($key);
+    if (! $installed) {
+      throw new Exception("Not installed: $key");
+    }
+
+    $this->_install($key);
   }
 
   function uninstall(string $key) {
