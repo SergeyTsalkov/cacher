@@ -6,9 +6,9 @@ use Symfony\Component\Lock\Store\PdoStore;
 
 // TODO: 
 // * if we have a username, we must also be root and the username must be real
-// * sudo to username when installing (in production)
 // * install by symlink
 // * copy (install without mentioning in database)
+// * user upgrade command -- upgrades all installed packages; don't let "install" work on already-installed packages
 
 class Cacher {
   private $s3;
@@ -179,10 +179,6 @@ class Cacher {
   }
 
   function install(string $key, string $path) {
-    if (! $this->username) {
-      throw new Exception("username is missing");
-    }
-
     $Lock = $this->lock("username:{$this->username}");
 
     if (! is_dir($path)) {
@@ -206,6 +202,9 @@ class Cacher {
         $this->say("Already installed: $key ({$installed['version']})");
         return;
       }
+      if ($installed['path'] != $path) {
+        throw new Exception("Already installed in $path, you can't specify a different path");
+      }
 
       // remove any files that are part of installed, but not part of local
       $installed_files = $installed['files'];
@@ -214,22 +213,18 @@ class Cacher {
 
       if ($files_to_remove) {
         $this->say("Removing old files from $path: ", join(', ', $files_to_remove));
-        foreach ($files_to_remove as $file) {
-          @unlink($this->path_join($path, $file));
-        }
+        $files_to_remove = array_map(fn($file) => $this->path_join($path, $file), $files_to_remove);
+        $this->sudo($this->username, 'rm -f', $files_to_remove);
       }
     }
 
     $this->localIndex->touch($key, $local['version']);
-    shell_exec('rsync -a ' . escapeshellarg($local['path'] . '/') . ' ' . escapeshellarg($path));
+    $this->sudo($this->username, 'rsync', ['-a', $local['path'] . '/', $path]);
     $this->installedIndex->add($key, $local['version'], $path, $local['files']);
     $this->say("Installed $key to $path");
   }
 
   function uninstall(string $key) {
-    if (! $this->username) {
-      throw new Exception("username is missing");
-    }
     $Lock = $this->lock("username:{$this->username}");
 
     $installed = $this->installedIndex->get($key);
@@ -237,9 +232,10 @@ class Cacher {
       throw new Exception("Not installed: $key");
     }
 
-    $files = $installed['files'];
-    foreach ($files as $file) {
-      @unlink($this->path_join($installed['path'], $file));
+    $files_to_remove = $installed['files'];
+    if ($files_to_remove) {
+      $files_to_remove = array_map(fn($file) => $this->path_join($installed['path'], $file), $files_to_remove);
+      $this->sudo($this->username, 'rm -f', $files_to_remove);
     }
 
     $this->installedIndex->delete($key);
@@ -323,6 +319,32 @@ class Cacher {
     $Lock = $Factory->createLock($name);
     $Lock->acquire(true);
     return $Lock;
+  }
+
+  private function sudo(string $username, string $command, array $args) {
+    $args = array_map('escapeshellarg', $args);
+    $command = array_merge([$command], $args);
+    $command = implode(' ', $command);
+
+    if (! defined('CACHER_IS_DEVELOPMENT')) {
+      if (posix_geteuid() != 0) {
+        throw new Exception("Unable to sudo to $username: we are not root");
+      }
+      if (! posix_getpwnam($username)) {
+        throw new Exception("Unable to sudo to $username: user does not exist");
+      }
+
+      $this->sayf('[sudo %s]: %s', $username, $command);
+      $command = sprintf('sudo -Hn -u %s bash -c %s', escapeshellarg($username), escapeshellarg($command));
+    } else {
+      $this->say($command);
+    }
+
+    shell_exec($command);
+  }
+
+  function sayf(string $str, string ...$args) {
+    return $this->say(sprintf($str, ...$args));
   }
 
   function say(string ...$messages) {
