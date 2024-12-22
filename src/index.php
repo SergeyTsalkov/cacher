@@ -154,6 +154,15 @@ class CacherIndex {
     return $old_items;
   }
 
+  function touch(string $key, string $version) {
+    if ($this->username) {
+      throw new Exception("touch() only works on remoteIndex and localIndex");
+    }
+
+    $this->db->query("UPDATE %b SET touched_at=CURRENT_TIMESTAMP 
+      WHERE `key`=%s AND version=%s", $this->table, $key, $version);
+  }
+
   function pdo() {
     return $this->db->get();
   }

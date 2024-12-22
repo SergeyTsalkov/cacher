@@ -9,7 +9,6 @@ use Symfony\Component\Lock\Store\PdoStore;
 // * sudo to username when installing (in production)
 // * install by symlink
 // * copy (install without mentioning in database)
-// * use touch()
 
 class Cacher {
   private $s3;
@@ -91,6 +90,7 @@ class Cacher {
       throw new Exception("Item $key does not exist in the cache");
     }
 
+    $this->remoteIndex->touch($key, $latest['version']);
     $remote_path = $latest['path'];
     $version = $latest['version'];
     $local_path = $this->local_path($key, $version);
@@ -220,6 +220,7 @@ class Cacher {
       }
     }
 
+    $this->localIndex->touch($key, $local['version']);
     shell_exec('rsync -a ' . escapeshellarg($local['path'] . '/') . ' ' . escapeshellarg($path));
     $this->installedIndex->add($key, $local['version'], $path, $local['files']);
     $this->say("Installed $key to $path");
