@@ -6,9 +6,9 @@ use Symfony\Component\Lock\Store\PdoStore;
 
 // TODO: 
 // * install by symlink
-// * copy (install without mentioning in database)
 // * deleteremote command (optionally with version)
 // * properly handle event where higher version vanishes upstream
+// * cleanlocal should do more, as planned
 
 class Cacher {
   private $s3;
@@ -179,11 +179,15 @@ class Cacher {
   }
 
   // used by both install and upgrade
-  private function _install(string $key, ?string $path=null) {
-    $installed = $this->installedIndex->get($key);
-    if ($installed) {
-      $path = $installed['path'];
+  private function _install(string $key, ?string $path=null, bool $copy_only=false) {
+    $installed = null;
+    if (! $copy_only) {
+      $installed = $this->installedIndex->get($key);
+      if ($installed) {
+        $path = $installed['path'];
+      }
     }
+    
     if (!$path) {
       throw new Exception("Path not specified");
     }
@@ -219,8 +223,18 @@ class Cacher {
 
     $this->localIndex->touch($key, $local['version']);
     $this->sudo($this->username, 'rsync', ['-a', $local['path'] . '/', $path]);
-    $this->installedIndex->add($key, $local['version'], $path, $local['files']);
-    $this->say("Installed $key ({$local['version']}) to $path");
+
+    if (! $copy_only) {
+      $this->installedIndex->add($key, $local['version'], $path, $local['files']);
+      $this->say("Installed $key ({$local['version']}) to $path");
+    } else {
+      $this->say("Copied $key ({$local['version']}) to $path");
+    }
+  }
+
+  function copy(string $key, string $path) {
+    $Lock = $this->lock("username:{$this->username}");
+    $this->_install($key, $path, true);
   }
 
   function install(string $key, string $path) {

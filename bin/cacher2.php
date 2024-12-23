@@ -26,6 +26,18 @@ function install(ParsedCommandLine $Cmd) {
   }
 }
 
+function copy(ParsedCommandLine $Cmd) {
+  list($username, $path) = $Cmd->args(1, 2);
+  $keys = $Cmd->args(3);
+  require_args($username, $path, $keys[0]);
+
+  $Cacher = new \Cacher($username);
+
+  foreach ($keys as $key) {
+    $Cacher->copy($key, $path);
+  }
+}
+
 function uninstall(ParsedCommandLine $Cmd) {
   $username = $Cmd->arg(1);
   $keys = $Cmd->args(2);
@@ -178,11 +190,14 @@ function help() {
   echo "  push <path> <key> [version] -- push new item to remote cache\n";
   echo "  pull <key1> [key2] ... -- pull item from remote to local cache\n";
   echo "  local [--json] -- list local cache items\n";
-  echo "  remote [--json] -- list remote cache items\n";
+  echo "  remote [--json] -- list remote cache items\n\n";
+
+  echo "  copy <username> <path> <key1> [key2] ... -- copy item from local cache (like install, but won't be upgraded)\n";
   echo "  install <username> <path> <key1> [key2] ... -- install item from local cache\n";
   echo "  uninstall <username> <key1> [key2] ... -- uninstall item from local cache\n";
   echo "  upgrade <username> -- upgrade all installed items\n";
-  echo "  installed [--json] <username> -- list installed items\n";
+  echo "  installed [--json] <username> -- list installed items\n\n";
+
   echo "  cleanlocal -- delete old local items\n";
   echo "  cleanremote -- delete old remote items\n";
   echo "  deletelocal <key1> [key2] ... - delete items from local cache\n";
