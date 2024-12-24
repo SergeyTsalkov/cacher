@@ -22,7 +22,7 @@ function install(ParsedCommandLine $Cmd) {
   $Cacher = new \Cacher($username);
 
   foreach ($keys as $key) {
-    $Cacher->install($key, $path);
+    $Cacher->install($key, $path, $Cmd->flag('symlink'));
   }
 }
 
@@ -85,74 +85,52 @@ function pull(ParsedCommandLine $Cmd) {
   }
 }
 
-function _local(string $match=null): array {
-  $Cacher = new \Cacher();
-  $local = $Cacher->localInfo($match);
-  $remote = $Cacher->remoteInfo($match);
-  $results = [];
-  foreach ($local as $key => $local_item) {
-    $remote_item = $remote[$key] ?? null;
-
-    $results[$key] = [
-      'local_version' => $local_item['version'],
-      'remote_version' => $remote_item['version'] ?? null,
-    ];
-  }
-  return $results;
-}
-
-function _remote(string $match=null): array {
-  $Cacher = new \Cacher();
-  $remote = $Cacher->remoteInfo($match);
-  $results = [];
-  foreach ($remote as $key => $remote_item) {
-    $results[$key] = [
-      'version' => $remote_item['version'],
-    ];
-  }
-  return $results;
-}
-
-function _installed(string $username): array {
-  $Cacher = new \Cacher($username);
-  $installed = $Cacher->installed();
-
-  $results = [];
-  foreach ($installed as $key => $item) {
-    $results[$key] = [
-      'version' => $item['version'],
-      'path' => $item['path'],
-    ];
-  }
-  return $results;
-}
-
 function local(ParsedCommandLine $Cmd) {
-  $results = _local($Cmd->arg(1));
+  $Cacher = new \Cacher();
+  $results = $Cacher->localinfo($Cmd->arg(1));
+
   if ($Cmd->flag('json')) {
     echo json_encode($results, JSON_PRETTY_PRINT) . "\n";
   } else {
     foreach ($results as $key => $item) {
-      if (is_null($item['remote_version'])) {
-        $status = 'missing from remote';
-      } else if ($item['local_version'] == $item['remote_version']) {
-        $status = 'up-to-date';
-      } else {
-        $status = 'needs update';
-      }
-
+      $status = $item['up_to_date'] ? 'up-to-date' : 'needs update';
       echo sprintf("%s (%s, %s)\n", $key, $item['local_version'], $status);
     }
   }
 }
 
 function remote(ParsedCommandLine $Cmd) {
-  $results = _remote($Cmd->arg(1));
+  $Cacher = new \Cacher();
+  $results = $Cacher->remoteinfo($Cmd->arg(1));
+
   if ($Cmd->flag('json')) {
     echo json_encode($results, JSON_PRETTY_PRINT) . "\n";
   } else {
     foreach ($results as $key => $item) {
       echo sprintf("%s (%s)\n", $key, $item['version']);
+    }
+  }
+}
+
+function installed(ParsedCommandLine $Cmd) {
+  $username = $Cmd->arg(1);
+  require_args($username);
+
+  $Cacher = new \Cacher($username);
+  $results = $Cacher->installedinfo();
+
+  if ($Cmd->flag('json')) {
+    echo json_encode($results, JSON_PRETTY_PRINT) . "\n";
+  } else {
+    foreach ($results as $key => $item) {
+      $status = $item['up_to_date'] ? 'up-to-date' : 'needs update';
+
+      $props = [$item['installed_version'], $status];
+      if ($item['is_symlink']) {
+        $props[] = 'symlink';
+      }
+
+      echo sprintf("%s (%s): %s\n", $key, implode(', ', $props), $item['path']);
     }
   }
 }
@@ -167,23 +145,6 @@ function cleanremote(ParsedCommandLine $Cmd) {
   $Cacher->cleanremote();
 }
 
-function installed(ParsedCommandLine $Cmd) {
-  $username = $Cmd->arg(1);
-  require_args($username);
-
-  $installed = _installed($username);
-
-  if ($Cmd->flag('json')) {
-    echo json_encode($installed, JSON_PRETTY_PRINT) . "\n";
-  } else {
-    foreach ($installed as $key => $item) {
-      echo sprintf("%s (%s): %s\n", $key, $item['version'], $item['path']);
-    }
-  }
-
-  
-}
-
 function help() {
   echo "Usage: cacher2 <command> [options]\n";
   echo "Commands:\n";
@@ -193,7 +154,7 @@ function help() {
   echo "  remote [--json] -- list remote cache items\n\n";
 
   echo "  copy <username> <path> <key1> [key2] ... -- copy item from local cache (like install, but won't be upgraded)\n";
-  echo "  install <username> <path> <key1> [key2] ... -- install item from local cache\n";
+  echo "  install [--symlink] <username> <path> <key1> [key2] ... -- install item from local cache\n";
   echo "  uninstall <username> <key1> [key2] ... -- uninstall item from local cache\n";
   echo "  upgrade <username> -- upgrade all installed items\n";
   echo "  installed [--json] <username> -- list installed items\n\n";

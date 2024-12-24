@@ -5,7 +5,6 @@ use Symfony\Component\Lock\Store\SemaphoreStore;
 use Symfony\Component\Lock\Store\PdoStore;
 
 // TODO: 
-// * install by symlink
 // * deleteremote command (optionally with version)
 // * properly handle event where higher version vanishes upstream
 // * cleanlocal should do more, as planned
@@ -170,16 +169,74 @@ class Cacher {
     }
   }
 
-  function localinfo(string $match=null) {
-    return $this->localIndex->search($match);
+  function remoteinfo(string $match=null): array {
+    $results = [];
+    $items = $this->remoteIndex->search($match);
+    foreach ($items as $key => $remote_item) {
+      $results[$key] = [
+        'version' => $remote_item['version'],
+      ];
+    }
+    return $results;
   }
 
-  function remoteinfo(string $match=null) {
-    return $this->remoteIndex->search($match);
+  function localinfo(string $match=null): array {
+    $local = $this->localIndex->search($match);
+    $keys = array_map(fn($item) => $item['key'], $local);
+    $remote = $this->remoteIndex->get($keys);
+
+    $results = [];
+    foreach ($local as $key => $local_item) {
+      $remote_item = $remote[$key] ?? null;
+      $up_to_date = !$remote_item || ($remote_item['version'] == $local_item['version']);
+
+      $results[$key] = [
+        'local_version' => $local_item['version'],
+        'remote_version' => $remote_item['version'] ?? null,
+        'up_to_date' => $up_to_date,
+      ];
+    }
+
+    return $results;
   }
 
-  // used by both install and upgrade
-  private function _install(string $key, ?string $path=null, bool $copy_only=false) {
+  function installedinfo(): array {
+    $installed = $this->installedIndex->search();
+    $keys = array_map(fn($item) => $item['key'], $installed);
+    $local = $this->localIndex->get($keys);
+    $remote = $this->remoteIndex->get($keys);
+
+    $results = [];
+    foreach ($installed as $key => $installed_item) {
+      $local_item = $local[$key] ?? null;
+      $remote_item = $remote[$key] ?? null;
+
+      $up_to_date = true;
+      if ($local_item && $installed_item['version'] != $local_item['version']) {
+        $up_to_date = false;
+      }
+      if ($remote_item && $installed_item['version'] != $remote_item['version']) {
+        $up_to_date = false;
+      }
+
+      $results[$key] = [
+        'path' => $installed_item['path'],
+        'is_symlink' => !!$installed_item['is_symlink'],
+        'installed_version' => $installed_item['version'],
+        'local_version' => $local_item['version'] ?? null,
+        'remote_version' => $remote_item['version'] ?? null,
+        'up_to_date' => $up_to_date,
+      ];
+    }
+    return $results;
+  }
+
+  function installed(): array {
+    return $this->installedIndex->search();
+  }
+
+  // used by install, upgrade, copy
+  private function _install(string $key, ?string $path=null, bool $copy_only=false, bool $use_symlink=false) {
     $installed = null;
     if (! $copy_only) {
       $installed = $this->installedIndex->get($key);
@@ -215,17 +272,21 @@ class Cacher {
       $files_to_remove = array_diff($installed_files, $local_files);
 
       if ($files_to_remove) {
-        $this->say("Removing old files from $path: ", join(', ', $files_to_remove));
-        $files_to_remove = array_map(fn($file) => $this->path_join($path, $file), $files_to_remove);
-        $this->sudo($this->username, 'rm -f', $files_to_remove);
+        $this->remove_files($path, $files_to_remove);
       }
     }
 
     $this->localIndex->touch($key, $local['version']);
-    $this->sudo($this->username, 'rsync', ['-a', $local['path'] . '/', $path]);
 
+    if ($use_symlink) {
+      $this->remove_files($path, $local['files']);
+      $this->sudo($this->username, 'cp', ['-sr', $local['path'] . '/.', $path]);
+    } else {
+      $this->sudo($this->username, 'rsync', ['-a', $local['path'] . '/', $path]);
+    }
+    
     if (! $copy_only) {
-      $this->installedIndex->add($key, $local['version'], $path, $local['files']);
+      $this->installedIndex->add($key, $local['version'], $path, $local['files'], $use_symlink);
       $this->say("Installed $key ({$local['version']}) to $path");
     } else {
       $this->say("Copied $key ({$local['version']}) to $path");
@@ -237,7 +298,7 @@ class Cacher {
     $this->_install($key, $path, true);
   }
 
-  function install(string $key, string $path) {
+  function install(string $key, string $path, $use_symlink=false) {
     $Lock = $this->lock("username:{$this->username}");
 
     $installed = $this->installedIndex->get($key);
@@ -245,7 +306,7 @@ class Cacher {
       throw new Exception("Already installed: $key");
     }
 
-    $this->_install($key, $path);
+    $this->_install($key, $path, false, $use_symlink);
   }
 
   function upgrade(?string $key=null) {
@@ -262,7 +323,7 @@ class Cacher {
       throw new Exception("Not installed: $key");
     }
 
-    $this->_install($key);
+    $this->_install($key, null, false, $installed['is_symlink']);
   }
 
   function uninstall(string $key) {
@@ -275,16 +336,11 @@ class Cacher {
 
     $files_to_remove = $installed['files'];
     if ($files_to_remove) {
-      $files_to_remove = array_map(fn($file) => $this->path_join($installed['path'], $file), $files_to_remove);
-      $this->sudo($this->username, 'rm -f', $files_to_remove);
+      $this->remove_files($installed['path'], $files_to_remove);
     }
 
     $this->installedIndex->delete($key);
     $this->say("Uninstalled $key");
-  }
-
-  function installed() {
-    return $this->installedIndex->search();
   }
 
   private function list_files(string $basedir): array {
@@ -307,6 +363,30 @@ class Cacher {
       $result[] = $relpath;
     }
     return $result;
+  }
+
+  private function remove_files(string $basedir, array $files) {
+    if (! is_dir($basedir)) {
+      throw new Exception("$basedir is not a directory");
+    }
+    if (! $files) return;
+
+    $basedir = realpath($basedir);
+    $dirs = [];
+    foreach ($files as &$file) {
+      $file = $this->path_join($basedir, $file);
+      $dir = realpath(dirname($file));
+      if ($basedir != $dir) {
+        $dirs[] = $dir;
+      }
+    }
+    $this->sudo($this->username, 'rm -f', $files);
+
+    $dirs = array_unique($dirs);
+    $dirs = array_filter($dirs, fn($dir) => $this->dir_is_empty($dir));
+    if ($dirs) {
+      $this->sudo($this->username, 'rmdir', $dirs);
+    }
   }
 
   private function item2path(string $key) {
