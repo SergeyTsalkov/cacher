@@ -58,13 +58,19 @@ function upgrade(ParsedCommandLine $Cmd) {
 }
 
 function deletelocal(ParsedCommandLine $Cmd) {
-  $items = $Cmd->args(1);
-  require_args($items[0]);
+  list($item, $version) = $Cmd->args(1, 2);
+  require_args($item);
 
   $Cacher = new \Cacher();
-  foreach ($items as $item) {
-    $Cacher->deletelocal($item);
-  }
+  $Cacher->deletelocal($item, $version);
+}
+
+function deleteremote(ParsedCommandLine $Cmd) {
+  list($item, $version) = $Cmd->args(1, 2);
+  require_args($item);
+
+  $Cacher = new \Cacher();
+  $Cacher->deleteremote($item, $version);
 }
 
 function push(ParsedCommandLine $Cmd) {
@@ -161,7 +167,8 @@ function help() {
 
   echo "  cleanlocal -- delete old local items\n";
   echo "  cleanremote -- delete old remote items\n";
-  echo "  deletelocal <key1> [key2] ... - delete items from local cache\n";
+  echo "  deletelocal <key> [version] - delete item from local cache\n";
+  echo "  deleteremote <key> [version] - delete item from remote cache\n";
   die();
 }
 

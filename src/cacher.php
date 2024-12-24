@@ -5,7 +5,6 @@ use Symfony\Component\Lock\Store\SemaphoreStore;
 use Symfony\Component\Lock\Store\PdoStore;
 
 // TODO: 
-// * deleteremote command (optionally with version)
 // * properly handle event where higher version vanishes upstream
 // * cleanlocal should do more, as planned
 
