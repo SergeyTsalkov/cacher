@@ -118,7 +118,7 @@ class CacherIndex {
     return $items;
   }
 
-  function versions(string $key) {
+  function versions(string $key): array {
     $items = $this->getall($key);
     if (! $items) return [];
 

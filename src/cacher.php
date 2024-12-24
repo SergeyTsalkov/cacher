@@ -5,7 +5,6 @@ use Symfony\Component\Lock\Store\SemaphoreStore;
 use Symfony\Component\Lock\Store\PdoStore;
 
 // TODO: 
-// * properly handle event where higher version vanishes upstream
 // * cleanlocal should do more, as planned
 
 class Cacher {
@@ -83,28 +82,33 @@ class Cacher {
   function pull(string $key) {
     $Lock = $this->lock("key:$key");
 
-    $latest = $this->remoteIndex->get($key);
-    if (! $latest) {
+    $remote = $this->remoteIndex->get($key);
+    if (! $remote) {
       throw new Exception("Item $key does not exist in the cache");
     }
+    $this->remoteIndex->touch($key, $remote['version']);
 
-    $this->remoteIndex->touch($key, $latest['version']);
-    $remote_path = $latest['path'];
-    $version = $latest['version'];
-    $local_path = $this->local_path($key, $version);
-
-    if ($exists = $this->localIndex->get($key, $version)) {
-      $this->say("Local cache already has $key ($version)");
-      return;
+    $version = $remote['version'];
+    $local_versions = $this->localIndex->versions($key);
+    foreach ($local_versions as $local_version) {
+      if (version_compare($local_version, $version) > 0) {
+        $this->say("Local version of $key ($local_version) is ahead of remote version $version, removing local..");
+        $this->deletelocal($key, $local_version);
+      }
+      else if (version_compare($local_version, $version) == 0) {
+        $this->say("Local cache already has $key ($version)");
+        return;
+      }
     }
-
+    
+    $local_path = $this->local_path($key, $version);
     if (is_dir($local_path) || file_exists($local_path)) {
       $fs = new Filesystem();
       $fs->remove($local_path);
     }
 
     mkdir($local_path, 0755, true);
-    $Manager = new \Aws\S3\Transfer($this->s3, $remote_path, $local_path);
+    $Manager = new \Aws\S3\Transfer($this->s3, $remote['path'], $local_path);
     $Manager->transfer();
 
     $files = $this->list_files($local_path);
