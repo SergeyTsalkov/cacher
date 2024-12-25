@@ -1,11 +1,7 @@
 <?php
 use Symfony\Component\Filesystem\Filesystem;
 use Symfony\Component\Lock\LockFactory;
-use Symfony\Component\Lock\Store\SemaphoreStore;
 use Symfony\Component\Lock\Store\PdoStore;
-
-// TODO: 
-// * cleanlocal should do more, as planned
 
 class Cacher {
   private $s3;
@@ -140,9 +136,30 @@ class Cacher {
   }
 
   function cleanlocal() {
-    $this->say("Cleaning local cache..");
+    // installed items with is_symlink set are "used"
+    // meaning we can't remove the localIndex version
+    $used = [];
+
+    // delete installed items that don't exist on disk anymore
+    $installed = $this->localIndex->allinstalled();
+    foreach ($installed as $item) {
+      if (!is_dir($item['path'])) {
+        $this->sayf("Deleting dead installed item: %s (%s)", $item['key'], $item['username']);
+        $this->localIndex->userdelete($item['username'], $item['key']);
+        continue;
+      }
+
+      if ($item['is_symlink']) {
+        $used[$item['key']][$item['version']] = true;
+      }
+    }
+
     foreach ($this->localIndex->old() as $item) {
-      $this->deletelocal($item['key'], $item['version']);
+      $key = $item['key'];
+      $version = $item['version'];
+
+      if (isset($used[$key][$version])) continue;
+      $this->deletelocal($key, $version);
     }
   }
 

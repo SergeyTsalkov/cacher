@@ -75,13 +75,21 @@ class CacherIndex {
   }
 
   // key is string or array, get all versions (sorted) for each match, return array
-  function getall($key, ?string $version=null): array {
+  function getall($key=null, ?string $version=null): array {
     $Where = new WhereClause('and');
     if ($this->username) $Where->add('username=%s', $this->username);
 
-    if (is_string($key)) $Where->add('`key`=%s', $key);
-    else if (is_array($key)) $Where->add('`key` IN %ls', $key);
-    else throw new Exception("key must be string or array");
+    if (is_string($key)) {
+      if (strlen($key) == 0) return [];
+      $Where->add('`key`=%s', $key);
+    }
+    else if (is_array($key)) {
+      if (count($key) == 0) return [];
+      $Where->add('`key` IN %ls', $key);
+    }
+    else if (!is_null($key)) {
+      throw new Exception("key must be string, array, or null");
+    }
 
     if ($version) $Where->add('version=%s', $version);
 
@@ -91,6 +99,9 @@ class CacherIndex {
     foreach ($results as &$row) {
       if (isset($row['files'])) {
         $row['files'] = json_decode($row['files'], true);
+      }
+      if (isset($row['is_symlink'])) {
+        $row['is_symlink'] = intval($row['is_symlink']);
       }
     }
 
@@ -139,41 +150,51 @@ class CacherIndex {
     $this->db->delete($this->table, $match);
   }
 
-  // return all items that are at least 24 hours older than the newest version of the same key
+  // if a given version has been available for at least 24 hours, any older versions
+  // of the same key are "old" and can be purged
   function old() {
-    $Where = new WhereClause('and');
+    $purge_after = 60*60*24; // 24 hours
+
     if ($this->username) {
-      $Where->add('username=%s', $this->username);
-    }
-    $results = $this->db->query("SELECT * FROM %b WHERE %l ORDER BY `key`", $this->table, $Where);
-    
-    $items = [];
-    $newest = [];
-    
-    // Group by key and find newest version
-    foreach ($results as $result) {
-      $items[$result['key']][] = $result;
-    }
-    foreach ($items as $key => $versions) {
-      usort($versions, fn($a, $b) => version_compare($b['version'], $a['version']));
-      $newest[$key] = $versions[0];
+      throw new Exception("old() shouldn't be used for installedIndex");
     }
 
-    $old_items = [];
-    foreach ($items as $key => $versions) {
-      $newest_time = strtotime($newest[$key]['created_at']);
-      
-      foreach ($versions as $version) {
-        if ($version === $newest[$key]) continue;
-        
-        $version_time = strtotime($version['created_at']);
-        if ($newest_time - $version_time >= 24 * 60 * 60) {
-          $old_items[] = $version;
-        }
+    // a "settled" version is the latest version that has been available
+    // for at least 24 hours, any older versions than that can be purged
+    $settled = []; // key -> version
+    $old = [];
+
+    $items = $this->getall();
+    foreach ($items as $item) {
+      $key = $item['key'];
+      if (isset($settled[$key])) continue;
+
+      $created_at = strtotime($item['created_at']);
+      if (time() - $created_at < $purge_after) continue;
+
+      $settled[$key] = $item['version'];
+    }
+
+    foreach ($items as $item) {
+      $key = $item['key'];
+      $version = $item['version'];
+      $settled_version = $settled[$key] ?? 0;
+
+      if (version_compare($version, $settled_version) < 0) {
+        $old[] = $item;
       }
     }
 
-    return $old_items;
+    return $old;
+  }
+
+  // installed items for all users
+  function allinstalled() {
+    return $this->db->query("SELECT * FROM installed");
+  }
+
+  function userdelete(string $username, string $key) {
+    $this->db->delete('installed', ['username' => $username, 'key' => $key]);
   }
 
   function touch(string $key, string $version) {
