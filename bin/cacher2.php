@@ -1,7 +1,7 @@
 #!/usr/bin/env php
 <?php
 namespace Cacher2;
-require_once __DIR__ . '/../vendor/autoload.php';
+require_once $_composer_autoload_path ?? __DIR__ . '/../vendor/autoload.php';
 
 $Cmd = new ParsedCommandLine($argv);
 $cmd = $Cmd->arg(0);
