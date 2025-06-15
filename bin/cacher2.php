@@ -19,7 +19,7 @@ function install(ParsedCommandLine $Cmd) {
   $keys = $Cmd->args(3);
   require_args($username, $path, $keys[0]);
 
-  $Cacher = new \Cacher($username);
+  $Cacher = new Cacher($username);
 
   foreach ($keys as $key) {
     $Cacher->install($key, $path, $Cmd->flag('symlink'));
@@ -31,7 +31,7 @@ function copy(ParsedCommandLine $Cmd) {
   $keys = $Cmd->args(3);
   require_args($username, $path, $keys[0]);
 
-  $Cacher = new \Cacher($username);
+  $Cacher = new Cacher($username);
 
   foreach ($keys as $key) {
     $Cacher->copy($key, $path);
@@ -43,7 +43,7 @@ function uninstall(ParsedCommandLine $Cmd) {
   $keys = $Cmd->args(2);
   require_args($username, $keys[0]);
 
-  $Cacher = new \Cacher($username);
+  $Cacher = new Cacher($username);
   foreach ($keys as $key) {
     $Cacher->uninstall($key);
   }
@@ -53,7 +53,7 @@ function upgrade(ParsedCommandLine $Cmd) {
   $username = $Cmd->arg(1);
   require_args($username);
 
-  $Cacher = new \Cacher($username);
+  $Cacher = new Cacher($username);
   $Cacher->upgrade();
 }
 
@@ -61,7 +61,7 @@ function deletelocal(ParsedCommandLine $Cmd) {
   list($item, $version) = $Cmd->args(1, 2);
   require_args($item);
 
-  $Cacher = new \Cacher();
+  $Cacher = new Cacher();
   $Cacher->deletelocal($item, $version);
 }
 
@@ -69,7 +69,7 @@ function deleteremote(ParsedCommandLine $Cmd) {
   list($item, $version) = $Cmd->args(1, 2);
   require_args($item);
 
-  $Cacher = new \Cacher();
+  $Cacher = new Cacher();
   $Cacher->deleteremote($item, $version);
 }
 
@@ -77,7 +77,7 @@ function push(ParsedCommandLine $Cmd) {
   list($path, $key, $version) = $Cmd->args(1, 3);
   require_args($path, $key);
 
-  $Cacher = new \Cacher();
+  $Cacher = new Cacher();
   $Cacher->push($path, $key, $version);
 }
 
@@ -85,14 +85,14 @@ function pull(ParsedCommandLine $Cmd) {
   $keys = $Cmd->args(1);
   require_args($keys[0]);
   
-  $Cacher = new \Cacher();
+  $Cacher = new Cacher();
   foreach ($keys as $key) {
     $Cacher->pull($key);
   }
 }
 
 function local(ParsedCommandLine $Cmd) {
-  $Cacher = new \Cacher();
+  $Cacher = new Cacher();
   $results = $Cacher->localinfo($Cmd->arg(1));
 
   if ($Cmd->flag('json')) {
@@ -106,7 +106,7 @@ function local(ParsedCommandLine $Cmd) {
 }
 
 function remote(ParsedCommandLine $Cmd) {
-  $Cacher = new \Cacher();
+  $Cacher = new Cacher();
   $results = $Cacher->remoteinfo($Cmd->arg(1));
 
   if ($Cmd->flag('json')) {
@@ -122,7 +122,7 @@ function installed(ParsedCommandLine $Cmd) {
   $username = $Cmd->arg(1);
   require_args($username);
 
-  $Cacher = new \Cacher($username);
+  $Cacher = new Cacher($username);
   $results = $Cacher->installedinfo();
 
   if ($Cmd->flag('json')) {
@@ -142,12 +142,12 @@ function installed(ParsedCommandLine $Cmd) {
 }
 
 function cleanlocal(ParsedCommandLine $Cmd) {
-  $Cacher = new \Cacher();
+  $Cacher = new Cacher();
   $Cacher->cleanlocal();
 }
 
 function cleanremote(ParsedCommandLine $Cmd) {
-  $Cacher = new \Cacher();
+  $Cacher = new Cacher();
   $Cacher->cleanremote();
 }
 
