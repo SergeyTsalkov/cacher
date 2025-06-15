@@ -15,6 +15,9 @@
             "src/init.php"
         ]
     },
+    "bin": [
+        "bin/cacher2.php"
+    ],
     "require": {
         "sergeytsalkov/meekrodb": "^3.1.3",
         "aws/aws-sdk-php": "3.*",
