@@ -38,7 +38,7 @@ class Cacher {
     ]);
 
     $home = $this->const('CACHER_HOME');
-    if (! is_dir($home)) @mkdir($home, 0700, true);
+    if (! is_dir($home)) @mkdir($home, 0755, true);
     if (! is_dir($home)) throw new Exception("CACHER_HOME dir ($home) doesn't exist");
 
     $local_index_file = $this->path_join($home, '.cacher2');
