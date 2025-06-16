@@ -3,6 +3,13 @@ namespace Cacher2;
 use Symfony\Component\Filesystem\Filesystem;
 use Symfony\Component\Lock\LockFactory;
 use Symfony\Component\Lock\Store\PdoStore;
+use \Exception;
+use \MeekroDB;
+use \Aws\S3\S3Client;
+use \RecursiveIteratorIterator;
+use \RecursiveDirectoryIterator;
+use \FilesystemIterator;
+
 
 class Cacher {
   private $s3;
@@ -12,14 +19,14 @@ class Cacher {
   private $installedIndex;
 
   function __construct(?string $username=null) {
-    $db = new \MeekroDB(
+    $db = new MeekroDB(
       $this->const('CACHER_DB_DSN'), 
       $this->const('CACHER_DB_USER'), 
       $this->const('CACHER_DB_PASS')
     );
 
     $endpoint = sprintf('https://%s.r2.cloudflarestorage.com', $this->const('CACHER_R2_ACCOUNT'));
-    $this->s3 = new \Aws\S3\S3Client([
+    $this->s3 = new S3Client([
         'region'  => 'auto',
         'endpoint' => $endpoint,
         'version' => 'latest',
@@ -54,20 +61,20 @@ class Cacher {
 
   function push(string $path, string $key, string $version=null) {
     if (! is_dir($path)) {
-      throw new \Exception("$path is not a directory");
+      throw new Exception("$path is not a directory");
     }
     if (! is_readable($path)) {
-      throw new \Exception("$path is not readable");
+      throw new Exception("$path is not readable");
     }
     if ($this->dir_is_empty($path)) {
-      throw new \Exception("$path has no files in it");
+      throw new Exception("$path has no files in it");
     }
 
     if (! $version) $version = time();
 
     $exists = $this->remoteIndex->get($key, $version);
     if ($exists) {
-      throw new \Exception("Remote cache already has $key ($version)");
+      throw new Exception("Remote cache already has $key ($version)");
     }
     
     $remote_path = $this->remote_path($key, $version);
@@ -83,7 +90,7 @@ class Cacher {
 
     $remote = $this->remoteIndex->get($key);
     if (! $remote) {
-      throw new \Exception("Item $key does not exist in the cache");
+      throw new Exception("Item $key does not exist in the cache");
     }
 
     $version = $remote['version'];
@@ -118,7 +125,7 @@ class Cacher {
     if (is_null($version)) {
       $versions = $this->localIndex->versions($key);
       if (! $versions) {
-        throw new \Exception("Item $key does not exist in local cache");
+        throw new Exception("Item $key does not exist in local cache");
       }
       foreach ($versions as $version) {
         $this->deletelocal($key, $version);
@@ -128,7 +135,7 @@ class Cacher {
 
     $item = $this->localIndex->get($key, $version);
     if (! $item) {
-      throw new \Exception("Item $key ($version) does not exist in local cache");
+      throw new Exception("Item $key ($version) does not exist in local cache");
     }
 
     $fs = new Filesystem();
@@ -169,7 +176,7 @@ class Cacher {
     if (is_null($version)) {
       $versions = $this->remoteIndex->versions($key);
       if (! $versions) {
-        throw new \Exception("Item $key does not exist in remote cache");
+        throw new Exception("Item $key does not exist in remote cache");
       }
       foreach ($versions as $version) {
         $this->deleteremote($key, $version);
@@ -268,10 +275,10 @@ class Cacher {
     }
     
     if (!$path) {
-      throw new \Exception("Path not specified");
+      throw new Exception("Path not specified");
     }
     if (!is_dir($path) || !is_writable($path)) {
-      throw new \Exception("Path doesn't look valid: $path");
+      throw new Exception("Path doesn't look valid: $path");
     }
 
     if (! $this->localUpToDate($key)) {
@@ -279,7 +286,7 @@ class Cacher {
     }
     $local = $this->localIndex->get($key);
     if (! $local) {
-      throw new \Exception("Unable to find: $key");
+      throw new Exception("Unable to find: $key");
     }
 
     if ($installed) {
@@ -325,7 +332,7 @@ class Cacher {
 
     $installed = $this->installedIndex->get($key);
     if ($installed) {
-      throw new \Exception("Already installed: $key");
+      throw new Exception("Already installed: $key");
     }
 
     $this->_install($key, $path, false, $use_symlink);
@@ -342,7 +349,7 @@ class Cacher {
     $Lock = $this->lock("username:{$this->username}");
     $installed = $this->installedIndex->get($key);
     if (! $installed) {
-      throw new \Exception("Not installed: $key");
+      throw new Exception("Not installed: $key");
     }
 
     $this->_install($key, null, false, $installed['is_symlink']);
@@ -353,7 +360,7 @@ class Cacher {
 
     $installed = $this->installedIndex->get($key);
     if (! $installed) {
-      throw new \Exception("Not installed: $key");
+      throw new Exception("Not installed: $key");
     }
 
     $files_to_remove = $installed['files'];
@@ -367,7 +374,7 @@ class Cacher {
 
   private function list_files(string $basedir): array {
     if (! is_dir($basedir)) {
-      throw new \Exception("$basedir is not a directory");
+      throw new Exception("$basedir is not a directory");
     }
 
     $result = [];
@@ -377,7 +384,7 @@ class Cacher {
 
       $path = $File->getPathname();
       if (! str_starts_with($path, $basedir)) {
-        throw new \Exception("This path does not start with $basedir: $path");
+        throw new Exception("This path does not start with $basedir: $path");
       }
 
       $relpath = substr($path, strlen($basedir));
@@ -389,7 +396,7 @@ class Cacher {
 
   private function remove_files(string $basedir, array $files) {
     if (! is_dir($basedir)) {
-      throw new \Exception("$basedir is not a directory");
+      throw new Exception("$basedir is not a directory");
     }
     if (! $files) return;
 
@@ -413,7 +420,7 @@ class Cacher {
 
   private function item2path(string $key) {
     if (preg_match('/[^\w\-:]/i', $key)) {
-      throw new \Exception("cache key contains invalid characters: $key");
+      throw new Exception("cache key contains invalid characters: $key");
     }
 
     $path = str_replace(':', '/', $key);
@@ -434,7 +441,7 @@ class Cacher {
 
   private function const(string $name) {
     if (! defined($name)) {
-      throw new \Exception("Constant not found: $name");
+      throw new Exception("Constant not found: $name");
     }
 
     return constant($name);
@@ -449,7 +456,7 @@ class Cacher {
     if (count($parts) == 0) return '';
     
     foreach ($parts as $i => &$part) {
-      if (strlen($part) == 0) throw new \Exception("path_join: part can't be empty");
+      if (strlen($part) == 0) throw new Exception("path_join: part can't be empty");
       if ($i == 0) $part = rtrim($part, '/');
       else $part = trim($part, '/');
     }
@@ -471,10 +478,10 @@ class Cacher {
 
     if (! defined('CACHER_IS_DEVELOPMENT')) {
       if (posix_geteuid() != 0) {
-        throw new \Exception("Unable to sudo to $username: we are not root");
+        throw new Exception("Unable to sudo to $username: we are not root");
       }
       if (! posix_getpwnam($username)) {
-        throw new \Exception("Unable to sudo to $username: user does not exist");
+        throw new Exception("Unable to sudo to $username: user does not exist");
       }
 
       $this->sayf('[sudo %s]: %s', $username, $command);
