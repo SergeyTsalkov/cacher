@@ -30,10 +30,11 @@ class Cacher {
         ],
     ]);
 
-    $home = getenv('HOME');
-    if (!$home || !is_dir($home)) throw new \Exception("Unable to determine HOME");
+    $home = $this->const('CACHER_HOME');
+    if (! is_dir($home)) @mkdir($home, 0700, true);
+    if (! is_dir($home)) throw new Exception("CACHER_HOME dir ($home) doesn't exist");
 
-    $local_index_file = $this->path_join($this->const('CACHER_HOME'), '.cacher2');
+    $local_index_file = $this->path_join($home, '.cacher2');
     $this->remoteIndex = new CacherIndex($db);
     $this->localIndex = new CacherIndex($local_index_file);
 
