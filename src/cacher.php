@@ -23,6 +23,7 @@ class Cacher {
         'region'  => 'auto',
         'endpoint' => $endpoint,
         'version' => 'latest',
+        'suppress_php_deprecation_warning' => true,
         'credentials' => [
           'key' => $this->const('CACHER_R2_KEY'),
           'secret' => $this->const('CACHER_R2_SECRET'),
