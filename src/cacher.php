@@ -190,9 +190,9 @@ class Cacher {
     }
   }
 
-  function remoteinfo(string $match=null): array {
+  function remoteinfo(string $match=null, bool $exact = false): array {
     $results = [];
-    $items = $this->remoteIndex->search($match);
+    $items = $this->remoteIndex->search($match, $exact);
     foreach ($items as $key => $remote_item) {
       $results[$key] = [
         'version' => $remote_item['version'],
@@ -201,8 +201,8 @@ class Cacher {
     return $results;
   }
 
-  function localinfo(string $match=null): array {
-    $local = $this->localIndex->search($match);
+  function localinfo(string $match=null, bool $exact = false): array {
+    $local = $this->localIndex->search($match, $exact);
     $keys = array_map(fn($item) => $item['key'], $local);
     $remote = $this->remoteIndex->get($keys);
 

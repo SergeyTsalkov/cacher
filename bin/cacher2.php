@@ -93,7 +93,7 @@ function pull(ParsedCommandLine $Cmd) {
 
 function local(ParsedCommandLine $Cmd) {
   $Cacher = new Cacher();
-  $results = $Cacher->localinfo($Cmd->arg(1));
+  $results = $Cacher->localinfo($Cmd->arg(1), $Cmd->flag('exact'));
 
   if ($Cmd->flag('json')) {
     echo json_encode($results, JSON_PRETTY_PRINT) . "\n";
@@ -107,7 +107,7 @@ function local(ParsedCommandLine $Cmd) {
 
 function remote(ParsedCommandLine $Cmd) {
   $Cacher = new Cacher();
-  $results = $Cacher->remoteinfo($Cmd->arg(1));
+  $results = $Cacher->remoteinfo($Cmd->arg(1), $Cmd->flag('exact'));
 
   if ($Cmd->flag('json')) {
     echo json_encode($results, JSON_PRETTY_PRINT) . "\n";
@@ -156,8 +156,8 @@ function help() {
   echo "Commands:\n";
   echo "  push <path> <key> [version] -- push new item to remote cache\n";
   echo "  pull <key1> [key2] ... -- pull item from remote to local cache\n";
-  echo "  local [--json] -- list local cache items\n";
-  echo "  remote [--json] -- list remote cache items\n\n";
+  echo "  local [search] [--json] [--exact] -- list local cache items\n";
+  echo "  remote [search] [--json] [--exact] -- list remote cache items\n\n";
 
   echo "  copy <username> <path> <key1> [key2] ... -- copy item from local cache (like install, but won't be upgraded)\n";
   echo "  install [--symlink] <username> <path> <key1> [key2] ... -- install item from local cache\n";

@@ -112,10 +112,13 @@ class CacherIndex {
   }
 
   // match substring against keys, return key->item hash with latest item for each match
-  function search(string $match=null) {
+  function search(string $match=null, bool $exact=false) {
     $Where = new \WhereClause('and');
     if ($this->username) $Where->add('username=%s', $this->username);
-    if ($match) $Where->add('`key` LIKE %s', $match . '%');
+    if ($match) {
+      if ($exact) $Where->add('`key` = %s', $match);
+      else $Where->add('`key` LIKE %s', $match . '%'); 
+    }
 
     $results = $this->db->query("SELECT * FROM %b WHERE %l ORDER BY `key`", $this->table, $Where);
     $items = [];

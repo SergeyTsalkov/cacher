@@ -25,7 +25,11 @@ class ParsedCommandLine {
   }
 
   function flag($flag) {
-    return in_array($flag, $this->flags);
+    return array_key_exists($flag, $this->flags);
+  }
+
+  function flags() {
+    return $this->flags;
   }
 
   function arg(int $index) {
