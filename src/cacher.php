@@ -85,7 +85,6 @@ class Cacher {
     if (! $remote) {
       throw new \Exception("Item $key does not exist in the cache");
     }
-    $this->remoteIndex->touch($key, $remote['version']);
 
     $version = $remote['version'];
     $local_versions = $this->localIndex->versions($key);

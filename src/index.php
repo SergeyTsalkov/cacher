@@ -203,8 +203,8 @@ class CacherIndex {
   }
 
   function touch(string $key, string $version) {
-    if ($this->username) {
-      throw new \Exception("touch() only works on remoteIndex and localIndex");
+    if ($this->username || $this->db->dbType() == 'mysql') {
+      throw new \Exception("touch() only works on localIndex");
     }
 
     $this->db->query("UPDATE %b SET touched_at=CURRENT_TIMESTAMP 
