@@ -29,7 +29,7 @@ class CacherIndex {
     if (count($tables) == 0) {
       $structure_file = sprintf('%s/../structure-%s.sql', __DIR__, $this->db->dbType());
       $structure = file_get_contents($structure_file);
-      $queries = array_filter(explode(';', $structure));
+      $queries = array_filter(array_map('trim', explode(';', $structure)));
 
       foreach ($queries as $query) {
         $this->db->query($query);
