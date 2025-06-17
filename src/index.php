@@ -1,5 +1,8 @@
 <?php
 namespace Cacher2;
+use \Exception;
+use \MeekroDB;
+use \WhereClause;
 
 class CacherIndex {
   private $db;
@@ -12,17 +15,17 @@ class CacherIndex {
       $this->table = 'installed';
     }
     
-    if ($handle instanceof \MeekroDB) {
+    if ($handle instanceof MeekroDB) {
       $this->db = $handle;
     }
     else if (is_string($handle)) {
       if (! file_exists($handle)) touch($handle);
       chmod($handle, 0600);
 
-      $this->db = new \MeekroDB("sqlite:$handle");
+      $this->db = new MeekroDB("sqlite:$handle");
     }
     else {
-      throw new \Exception("CacherIndex expects a MeekroDB object or sqlite filename");
+      throw new Exception("CacherIndex expects a MeekroDB object or sqlite filename");
     }
 
     $tables = $this->db->tableList();
@@ -78,7 +81,7 @@ class CacherIndex {
 
   // key is string or array, get all versions (sorted) for each match, return array
   function getall($key=null, ?string $version=null): array {
-    $Where = new \WhereClause('and');
+    $Where = new WhereClause('and');
     if ($this->username) $Where->add('username=%s', $this->username);
 
     if (is_string($key)) {
@@ -90,7 +93,7 @@ class CacherIndex {
       $Where->add('`key` IN %ls', $key);
     }
     else if (!is_null($key)) {
-      throw new \Exception("key must be string, array, or null");
+      throw new Exception("key must be string, array, or null");
     }
 
     if ($version) $Where->add('version=%s', $version);
@@ -113,7 +116,7 @@ class CacherIndex {
 
   // match substring against keys, return key->item hash with latest item for each match
   function search(string $match=null, bool $exact=false) {
-    $Where = new \WhereClause('and');
+    $Where = new WhereClause('and');
     if ($this->username) $Where->add('username=%s', $this->username);
     if ($match) {
       if ($exact) $Where->add('`key` = %s', $match);
@@ -161,7 +164,7 @@ class CacherIndex {
     $purge_after = 60*60*24; // 24 hours
 
     if ($this->username) {
-      throw new \Exception("old() shouldn't be used for installedIndex");
+      throw new Exception("old() shouldn't be used for installedIndex");
     }
 
     // a "settled" version is the latest version that has been available
@@ -204,7 +207,7 @@ class CacherIndex {
 
   function touch(string $key, string $version) {
     if ($this->username || $this->db->dbType() == 'mysql') {
-      throw new \Exception("touch() only works on localIndex");
+      throw new Exception("touch() only works on localIndex");
     }
 
     $this->db->query("UPDATE %b SET touched_at=CURRENT_TIMESTAMP 
