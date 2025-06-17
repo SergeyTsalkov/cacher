@@ -41,22 +41,19 @@ class Cacher {
     if (! is_dir($home)) @mkdir($home, 0755, true);
     if (! is_dir($home)) throw new Exception("CACHER_HOME dir ($home) doesn't exist");
 
+    $this->username = $username;
     $local_index_file = $this->path_join($home, '.cacher2');
-    $this->remoteIndex = new CacherIndex($db);
-    $this->localIndex = new CacherIndex($local_index_file);
-
-    if ($username) {
-      $this->username = $username;
-      $this->installedIndex = new CacherIndex($local_index_file, $username);
-    }
+    $this->remoteIndex = new CacherIndex('remote', $db);
+    $this->localIndex = new CacherIndex('local', $local_index_file);
+    $this->installedIndex = new CacherIndex('installed', $local_index_file, $username);
   }
 
   function localUpToDate(string $key) {
-    $remote = $this->remoteIndex->get($key);
-    $local = $this->localIndex->get($key);
+    $Remote = $this->remoteIndex->getIV($key);
+    $Local = $this->localIndex->getIV($key);
 
-    if (!$local || !$remote) return false;
-    return $local['version'] == $remote['version'];
+    if (!$Local || !$Remote) return false;
+    return $Local->version == $Remote->version;
   }
 
   function push(string $path, string $key, string $version=null) {
@@ -72,8 +69,7 @@ class Cacher {
 
     if (! $version) $version = time();
 
-    $exists = $this->remoteIndex->get($key, $version);
-    if ($exists) {
+    if ($this->remoteIndex->getIV($key, $version)) {
       throw new Exception("Remote cache already has $key ($version)");
     }
     
@@ -88,12 +84,12 @@ class Cacher {
   function pull(string $key) {
     $Lock = $this->lock("key:$key");
 
-    $remote = $this->remoteIndex->get($key);
-    if (! $remote) {
+    $Remote = $this->remoteIndex->getIV($key);
+    if (! $Remote) {
       throw new Exception("Item $key does not exist in the cache");
     }
 
-    $version = $remote['version'];
+    $version = $Remote->version;
     $local_versions = $this->localIndex->versions($key);
     foreach ($local_versions as $local_version) {
       if (version_compare($local_version, $version) > 0) {
@@ -121,57 +117,6 @@ class Cacher {
     $this->say("Pulled $key ($version)");
   }
 
-  function deletelocal(string $key, string $version=null) {
-    if (is_null($version)) {
-      $versions = $this->localIndex->versions($key);
-      if (! $versions) {
-        throw new Exception("Item $key does not exist in local cache");
-      }
-      foreach ($versions as $version) {
-        $this->deletelocal($key, $version);
-      }
-      return;
-    }
-
-    $item = $this->localIndex->get($key, $version);
-    if (! $item) {
-      throw new Exception("Item $key ($version) does not exist in local cache");
-    }
-
-    $fs = new Filesystem();
-    $fs->remove($item['path']);
-    $this->localIndex->delete($key, $version);
-    $this->say("Deleted $key ($version) from local cache");
-  }
-
-  function cleanlocal() {
-    // installed items with is_symlink set are "used"
-    // meaning we can't remove the localIndex version
-    $used = [];
-
-    // delete installed items that don't exist on disk anymore
-    $installed = $this->localIndex->allinstalled();
-    foreach ($installed as $item) {
-      if (!is_dir($item['path'])) {
-        $this->sayf("Deleting dead installed item: %s (%s)", $item['key'], $item['username']);
-        $this->localIndex->userdelete($item['username'], $item['key']);
-        continue;
-      }
-
-      if ($item['is_symlink']) {
-        $used[$item['key']][$item['version']] = true;
-      }
-    }
-
-    foreach ($this->localIndex->old() as $item) {
-      $key = $item['key'];
-      $version = $item['version'];
-
-      if (isset($used[$key][$version])) continue;
-      $this->deletelocal($key, $version);
-    }
-  }
-
   function deleteremote(string $key, string $version=null) {
     if (is_null($version)) {
       $versions = $this->remoteIndex->versions($key);
@@ -184,11 +129,73 @@ class Cacher {
       return;
     }
 
+    if (! $this->remoteIndex->getIV($key, $version)) {
+      throw new Exception("Item $key ($version) does not exist in remote cache");
+    }
+
     // trailing slash is important so that path/1 doesn't match path/11
     $remote_path = $this->remote_path($key, $version, true) . '/';
     $this->s3->deleteMatchingObjects($this->const('CACHER_R2_BUCKET'), $remote_path);
     $this->remoteIndex->delete($key, $version);
     $this->say("Deleted $key ($version) from remote cache");
+  }
+
+  function deletelocal(string $key, string $version=null) {
+    if (is_null($version)) {
+      $versions = $this->localIndex->versions($key);
+      if (! $versions) {
+        throw new Exception("Item $key does not exist in local cache");
+      }
+      foreach ($versions as $version) {
+        $this->deletelocal($key, $version);
+      }
+      return;
+    }
+
+    $Item = $this->localIndex->getIV($key, $version);
+    if (! $Item) {
+      throw new Exception("Item $key ($version) does not exist in local cache");
+    }
+
+    $fs = new Filesystem();
+    $fs->remove($Item->path);
+    $this->localIndex->delete($key, $version);
+    $this->say("Deleted $key ($version) from local cache");
+  }
+
+  function cleanlocal() {
+    // installed items with is_symlink set are "used"
+    // meaning we can't remove the localIndex version
+    $used = [];
+
+    // delete installed items that don't exist on disk anymore
+    $users = $this->installedIndex->lusers();
+    foreach ($users as $user) {
+      $this->installedIndex->setUser($user);
+
+      $Installed = $this->installedIndex->search();
+      foreach ($Installed as $Item) {
+        foreach ($Item as $IV) {
+          if (!is_dir($IV->path)) {
+            $this->sayf("Deleting dead installed item: %s (%s)", $IV->key, $user);
+            $this->installedIndex->delete($IV->key);
+            continue;
+          }
+
+          if ($IV->is_symlink) {
+            $used[$IV->key][$IV->version] = true;
+          }
+        }
+      }
+    }
+
+    foreach ($this->localIndex->old() as $IV) {
+      $key = $IV->key;
+      $version = $IV->version;
+
+      if (isset($used[$key][$version])) continue;
+      $this->deletelocal($key, $version);
+    }
   }
 
   function cleanremote() {
@@ -200,29 +207,32 @@ class Cacher {
 
   function remoteinfo(string $match=null, bool $exact = false): array {
     $results = [];
-    $items = $this->remoteIndex->search($match, $exact);
-    foreach ($items as $key => $remote_item) {
-      $results[$key] = [
-        'version' => $remote_item['version'],
+    $ItemSet = $this->remoteIndex->search($match, !$exact);
+    foreach ($ItemSet as $Item) {
+      $results[$Item->key] = [
+        'version' => $Item->version(),
+        'created_at' => $Item->get()->created_at,
       ];
     }
     return $results;
   }
 
   function localinfo(string $match=null, bool $exact = false): array {
-    $local = $this->localIndex->search($match, $exact);
-    $keys = array_map(fn($item) => $item['key'], $local);
-    $remote = $this->remoteIndex->get($keys);
+    $Local = $this->localIndex->search($match, !$exact);
+    $Remote = $this->remoteIndex->search($Local->keys());
 
     $results = [];
-    foreach ($local as $key => $local_item) {
-      $remote_item = $remote[$key] ?? null;
-      $up_to_date = !$remote_item || ($remote_item['version'] == $local_item['version']);
-
+    foreach ($Local as $LocalItem) {
+      $key = $LocalItem->key;
+      $remote_version = null;
+      if ($RemoteItem = $Remote->get($key)) {
+        $remote_version = $RemoteItem->version();
+      }
+      
       $results[$key] = [
-        'local_version' => $local_item['version'],
-        'remote_version' => $remote_item['version'] ?? null,
-        'up_to_date' => $up_to_date,
+        'local_version' => $LocalItem->version(),
+        'remote_version' => $remote_version,
+        'up_to_date' => $LocalItem->version() == $remote_version,
       ];
     }
 
@@ -230,47 +240,45 @@ class Cacher {
   }
 
   function installedinfo(): array {
-    $installed = $this->installedIndex->search();
-    $keys = array_map(fn($item) => $item['key'], $installed);
-    $local = $this->localIndex->get($keys);
-    $remote = $this->remoteIndex->get($keys);
+    $Installed = $this->installedIndex->search();
+    $Local = $this->localIndex->search($Installed->keys());
+    $Remote = $this->remoteIndex->search($Installed->keys());
 
     $results = [];
-    foreach ($installed as $key => $installed_item) {
-      $local_item = $local[$key] ?? null;
-      $remote_item = $remote[$key] ?? null;
+    foreach ($Installed as $Item) {
+      $IV = $Item->get();
+      $key = $Item->key;
 
       $up_to_date = true;
-      if ($local_item && $installed_item['version'] != $local_item['version']) {
+      $LocalItem = $Local->get($key);
+      $RemoteItem = $Remote->get($key);
+
+      if ($LocalItem && $Item->version() != $LocalItem->version()) {
         $up_to_date = false;
       }
-      if ($remote_item && $installed_item['version'] != $remote_item['version']) {
+      if ($RemoteItem && $Item->version() != $RemoteItem->version()) {
         $up_to_date = false;
       }
 
       $results[$key] = [
-        'path' => $installed_item['path'],
-        'is_symlink' => !!$installed_item['is_symlink'],
-        'installed_version' => $installed_item['version'],
-        'local_version' => $local_item['version'] ?? null,
-        'remote_version' => $remote_item['version'] ?? null,
+        'path' => $IV->path,
+        'is_symlink' => $IV->is_symlink,
+        'installed_version' => $IV->version,
+        'local_version' => $LocalItem ? $LocalItem->version() : null,
+        'remote_version' => $RemoteItem ? $RemoteItem->version() : null,
         'up_to_date' => $up_to_date,
       ];
     }
     return $results;
   }
 
-  function installed(): array {
-    return $this->installedIndex->search();
-  }
-
   // used by install, upgrade, copy
   private function _install(string $key, ?string $path=null, bool $copy_only=false, bool $use_symlink=false) {
-    $installed = null;
+    $InstalledItem = null;
     if (! $copy_only) {
-      $installed = $this->installedIndex->get($key);
-      if ($installed) {
-        $path = $installed['path'];
+      $InstalledItem = $this->installedIndex->getIV($key);
+      if ($InstalledItem) {
+        $path = $InstalledItem->path;
       }
     }
     
@@ -284,41 +292,39 @@ class Cacher {
     if (! $this->localUpToDate($key)) {
       $this->pull($key);
     }
-    $local = $this->localIndex->get($key);
-    if (! $local) {
+    $LocalItem = $this->localIndex->getIV($key);
+    if (! $LocalItem) {
       throw new Exception("Unable to find: $key");
     }
 
-    if ($installed) {
-      if ($installed['version'] == $local['version']) {
-        $this->say("Already latest version: $key ({$installed['version']})");
+    if ($InstalledItem) {
+      if ($InstalledItem->version == $LocalItem->version) {
+        $this->sayf("Already latest version: %s (%s)", $key, $InstalledItem->version);
         return;
       }
 
       // remove any files that are part of installed, but not part of local
-      $installed_files = $installed['files'];
-      $local_files = $local['files'];
-      $files_to_remove = array_diff($installed_files, $local_files);
+      $files_to_remove = array_diff($InstalledItem->files, $LocalItem->files);
 
       if ($files_to_remove) {
         $this->remove_files($path, $files_to_remove);
       }
     }
 
-    $this->localIndex->touch($key, $local['version']);
+    $this->localIndex->touch($key, $LocalItem->version);
 
     if ($use_symlink) {
-      $this->remove_files($path, $local['files']);
-      $this->sudo($this->username, 'cp', ['-sr', $local['path'] . '/.', $path]);
+      $this->remove_files($path, $LocalItem->files);
+      $this->sudo($this->username, 'cp', ['-sr', $LocalItem->path . '/.', $path]);
     } else {
-      $this->sudo($this->username, 'rsync', ['-a', $local['path'] . '/', $path]);
+      $this->sudo($this->username, 'rsync', ['-a', $LocalItem->path . '/', $path]);
     }
     
     if (! $copy_only) {
-      $this->installedIndex->add($key, $local['version'], $path, $local['files'], $use_symlink);
-      $this->say("Installed $key ({$local['version']}) to $path");
+      $this->installedIndex->add($key, $LocalItem->version, $path, $LocalItem->files, $use_symlink);
+      $this->say("Installed $key ({$LocalItem->version}) to $path");
     } else {
-      $this->say("Copied $key ({$local['version']}) to $path");
+      $this->say("Copied $key ({$LocalItem->version}) to $path");
     }
   }
 
@@ -330,8 +336,7 @@ class Cacher {
   function install(string $key, string $path, $use_symlink=false) {
     $Lock = $this->lock("username:{$this->username}");
 
-    $installed = $this->installedIndex->get($key);
-    if ($installed) {
+    if ($this->installedIndex->getIV($key)) {
       throw new Exception("Already installed: $key");
     }
 
@@ -340,32 +345,31 @@ class Cacher {
 
   function upgrade(?string $key=null) {
     if (! $key) {
-      foreach ($this->installed() as $item) {
-        $this->upgrade($item['key']);
+      foreach ($this->installedIndex->search() as $Item) {
+        $this->upgrade($Item->key);
       }
       return;
     }
 
     $Lock = $this->lock("username:{$this->username}");
-    $installed = $this->installedIndex->get($key);
-    if (! $installed) {
+    $Installed = $this->installedIndex->getIV($key);
+    if (! $Installed) {
       throw new Exception("Not installed: $key");
     }
 
-    $this->_install($key, null, false, $installed['is_symlink']);
+    $this->_install($key, null, false, $Installed->is_symlink);
   }
 
   function uninstall(string $key) {
     $Lock = $this->lock("username:{$this->username}");
 
-    $installed = $this->installedIndex->get($key);
-    if (! $installed) {
+    $Installed = $this->installedIndex->getIV($key);
+    if (! $Installed) {
       throw new Exception("Not installed: $key");
     }
 
-    $files_to_remove = $installed['files'];
-    if ($files_to_remove) {
-      $this->remove_files($installed['path'], $files_to_remove);
+    if ($files_to_remove = $Installed->files) {
+      $this->remove_files($Installed->path, $files_to_remove);
     }
 
     $this->installedIndex->delete($key);

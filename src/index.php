@@ -8,17 +8,29 @@ class CacherIndex {
   private $db;
   private ?string $username=null;
   private string $table='items';
+  private string $type;
 
-  function __construct($handle, ?string $username=null) {
-    if ($username) {
+  function __construct(string $type, $handle, ?string $username=null) {
+    $this->type = $type;
+    if (!in_array($type, ['remote', 'local', 'installed'])) {
+      throw new Exception("invalid index type");
+    }
+    if ($this->isInstalled()) {
       $this->username = $username;
       $this->table = 'installed';
     }
     
     if ($handle instanceof MeekroDB) {
+      if (!$this->isRemote()) {
+        throw new Exception("MeekroDB handle only appropriate for remote index");
+      }
       $this->db = $handle;
     }
     else if (is_string($handle)) {
+      if ($this->isRemote()) {
+        throw new Exception("string handle not appropriate for remote index");
+      }
+
       if (! file_exists($handle)) touch($handle);
       chmod($handle, 0600);
 
@@ -40,6 +52,26 @@ class CacherIndex {
     }
   }
 
+  function isRemote() { return $this->type == 'remote'; }
+  function isLocal() { return $this->type == 'local'; }
+  function isInstalled() { return $this->type == 'installed'; }
+
+  function lusers(): array {
+    if (! $this->isInstalled()) {
+      throw new Exception("lusers is only available for the installed index");
+    }
+
+    return $this->db->queryFirstColumn("SELECT DISTINCT username FROM %b", $this->table);
+  }
+
+  function setUser(string $username) {
+    if (! $this->isInstalled()) {
+      throw new Exception("setUser is only available for the installed index");
+    }
+
+    $this->username = $username;
+  }
+
   function add(string $key, string $version, string $path, ?array $files=[], bool $is_symlink=false) {
     $item = [
       'key' => $key,
@@ -50,7 +82,7 @@ class CacherIndex {
       $item['files'] = json_encode($files);
     }
 
-    if ($this->username) {
+    if ($this->isInstalled()) {
       $item['is_symlink'] = $is_symlink ? 1 : 0;
       $item['username'] = $this->username;
       $this->db->replace($this->table, $item);
@@ -59,89 +91,60 @@ class CacherIndex {
     }
   }
 
-  // if key is string: return single item, either latest version or matching the given version
-  // if key is array: return key->item hash, the latest version for each one
-  function get($key, ?string $version=null) {
-    $items = $this->getall($key, $version);
-    if (! $items) {
-      return is_array($key) ? [] : null;
-    }
-
-    if (! is_array($key)) {
-      return $items[0];
-    }
-
-    $_results = [];
-    foreach ($items as $item) {
-      if (array_key_exists($item['key'], $_results)) continue;
-      $_results[$item['key']] = $item;
-    }
-    return $_results;
+  function get(string $key): ?Item {
+    $ItemSet = $this->search($key);
+    return $ItemSet->get($key);
   }
 
-  // key is string or array, get all versions (sorted) for each match, return array
-  function getall($key=null, ?string $version=null): array {
-    $Where = new WhereClause('and');
-    if ($this->username) $Where->add('username=%s', $this->username);
+  function getIV(string $key, string $version=null): ?ItemVersion {
+    $Item = $this->get($key);
+    if ($Item) return $Item->get($version);
+    return null;
+  }
 
+  function search($key=null, bool $substring=false): ItemSet {
+    $ItemSet = new ItemSet();
+
+    $Where = new WhereClause('and');
+    if ($this->isInstalled()) $Where->add('username=%s', $this->username);
+    
     if (is_string($key)) {
-      if (strlen($key) == 0) return [];
-      $Where->add('`key`=%s', $key);
+      if (strlen($key) == 0) return $ItemSet;
+      if ($substring) $Where->add('`key` LIKE %s', $key . '%'); 
+      else $Where->add('`key`=%s', $key);
     }
     else if (is_array($key)) {
-      if (count($key) == 0) return [];
+      if (count($key) == 0) return $ItemSet;
       $Where->add('`key` IN %ls', $key);
     }
     else if (!is_null($key)) {
       throw new Exception("key must be string, array, or null");
     }
 
-    if ($version) $Where->add('version=%s', $version);
-
-    $results = $this->db->query("SELECT * FROM %b WHERE %l", $this->table, $Where);
-    if (! $results) return [];
-
-    foreach ($results as &$row) {
-      if (isset($row['files'])) {
-        $row['files'] = json_decode($row['files'], true);
-      }
-      if (isset($row['is_symlink'])) {
-        $row['is_symlink'] = intval($row['is_symlink']);
-      }
+    if ($this->db->dbType() == 'sqlite') {
+      $ts_block = "strftime('%s', created_at) as created_at_ts";
+    } else {
+      $ts_block = "unix_timestamp(created_at) as created_at_ts";
     }
 
-    usort($results, fn($a, $b) => version_compare($b['version'], $a['version']));
-    return $results;
-  }
-
-  // match substring against keys, return key->item hash with latest item for each match
-  function search(string $match=null, bool $exact=false) {
-    $Where = new WhereClause('and');
-    if ($this->username) $Where->add('username=%s', $this->username);
-    if ($match) {
-      if ($exact) $Where->add('`key` = %s', $match);
-      else $Where->add('`key` LIKE %s', $match . '%'); 
-    }
-
-    $results = $this->db->query("SELECT * FROM %b WHERE %l ORDER BY `key`", $this->table, $Where);
-    $items = [];
+    $results = $this->db->query("SELECT *,%l FROM %b WHERE %l", $ts_block, $this->table, $Where);
     foreach ($results as $result) {
-      $items[$result['key']][] = $result;
+      $IV = new ItemVersion($result['version'], $result['path'], $result['created_at_ts']);
+      if (isset($result['is_symlink'])) $IV->is_symlink = !!$result['is_symlink'];
+      if (isset($result['files'])) {
+        $IV->files = json_decode($result['files'], true);
+      }
+
+      $ItemSet->add($result['key'], $IV);
     }
 
-    foreach ($items as $key => $versions) {
-      usort($versions, fn($a, $b) => version_compare($b['version'], $a['version']));
-      $items[$key] = $versions[0];
-    }
-
-    return $items;
+    return $ItemSet;
   }
 
   function versions(string $key): array {
-    $items = $this->getall($key);
-    if (! $items) return [];
-
-    return array_map(fn($item) => $item['version'], $items);
+    $Item = $this->get($key);
+    if (! $Item) return [];
+    return $Item->versions();
   }
 
   function version(string $key) {
@@ -151,7 +154,7 @@ class CacherIndex {
 
   function delete(string $key, ?string $version=null) {
     $match = [];
-    if ($this->username) $match['username'] = $this->username;
+    if ($this->isInstalled()) $match['username'] = $this->username;
     $match['key'] = $key;
     if ($version) $match['version'] = $version;
 
@@ -160,10 +163,10 @@ class CacherIndex {
 
   // if a given version has been available for at least 24 hours, any older versions
   // of the same key are "old" and can be purged
-  function old() {
+  function old(): array {
     $purge_after = 60*60*24; // 24 hours
 
-    if ($this->username) {
+    if ($this->isInstalled()) {
       throw new Exception("old() shouldn't be used for installedIndex");
     }
 
@@ -172,41 +175,32 @@ class CacherIndex {
     $settled = []; // key -> version
     $old = [];
 
-    $items = $this->getall();
-    foreach ($items as $item) {
-      $key = $item['key'];
-      if (isset($settled[$key])) continue;
+    $Items = $this->search();
+    foreach ($Items as $Item) {
+      foreach ($Item as $IV) {
+        if (time() - $IV->created_at < $purge_after) continue;
 
-      $created_at = strtotime($item['created_at']);
-      if (time() - $created_at < $purge_after) continue;
-
-      $settled[$key] = $item['version'];
+        $settled[$Item->key] = $IV->version;
+        continue 2;
+      }
     }
 
-    foreach ($items as $item) {
-      $key = $item['key'];
-      $version = $item['version'];
+    foreach ($Items as $Item) {
+      $key = $Item->key;
       $settled_version = $settled[$key] ?? 0;
 
-      if (version_compare($version, $settled_version) < 0) {
-        $old[] = $item;
+      foreach ($Item as $IV) {
+        if (version_compare($IV->version, $settled_version) < 0) {
+          $old[] = $IV;
+        }
       }
     }
 
     return $old;
   }
 
-  // installed items for all users
-  function allinstalled() {
-    return $this->db->query("SELECT * FROM installed");
-  }
-
-  function userdelete(string $username, string $key) {
-    $this->db->delete('installed', ['username' => $username, 'key' => $key]);
-  }
-
   function touch(string $key, string $version) {
-    if ($this->username || $this->db->dbType() == 'mysql') {
+    if (!$this->isLocal()) {
       throw new Exception("touch() only works on localIndex");
     }
 
