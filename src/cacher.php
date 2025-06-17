@@ -109,7 +109,7 @@ class Cacher {
     }
 
     mkdir($local_path, 0755, true);
-    $Manager = new \Aws\S3\Transfer($this->s3, $remote['path'], $local_path);
+    $Manager = new \Aws\S3\Transfer($this->s3, $Remote->path, $local_path);
     $Manager->transfer();
 
     $files = $this->list_files($local_path);
@@ -129,13 +129,14 @@ class Cacher {
       return;
     }
 
-    if (! $this->remoteIndex->getIV($key, $version)) {
+    $Item = $this->remoteIndex->getIV($key, $version);
+    if (!$Item) {
       throw new Exception("Item $key ($version) does not exist in remote cache");
     }
 
     // trailing slash is important so that path/1 doesn't match path/11
-    $remote_path = $this->remote_path($key, $version, true) . '/';
-    $this->s3->deleteMatchingObjects($this->const('CACHER_R2_BUCKET'), $remote_path);
+    list($bucket, $remote_path) = $Item->splitPath();
+    $this->s3->deleteMatchingObjects($bucket, $remote_path . '/');
     $this->remoteIndex->delete($key, $version);
     $this->say("Deleted $key ($version) from remote cache");
   }
@@ -200,8 +201,8 @@ class Cacher {
 
   function cleanremote() {
     $this->say("Cleaning remote cache..");
-    foreach ($this->remoteIndex->old() as $item) {
-      $this->deleteremote($item['key'], $item['version']);
+    foreach ($this->remoteIndex->old() as $IV) {
+      $this->deleteremote($IV->key, $IV->version);
     }
   }
 
@@ -343,21 +344,32 @@ class Cacher {
     $this->_install($key, $path, false, $use_symlink);
   }
 
-  function upgrade(?string $key=null) {
-    if (! $key) {
-      foreach ($this->installedIndex->search() as $Item) {
-        $this->upgrade($Item->key);
-      }
-      return;
-    }
-
+  function upgrade($keys=null) {
     $Lock = $this->lock("username:{$this->username}");
-    $Installed = $this->installedIndex->getIV($key);
-    if (! $Installed) {
-      throw new Exception("Not installed: $key");
+
+    if (is_string($keys)) {
+      $keys = [$keys];
+    }
+    else if (is_null($keys)) {
+      $keys = $this->installedIndex->search()->keys();
+    }
+    else if (is_array($keys)) {
+      // do nothing
+    } else {
+      throw new Exception("invalid argument");
     }
 
-    $this->_install($key, null, false, $Installed->is_symlink);
+    // grab all remote info into cache with one query
+    $this->remoteIndex->search($keys);
+
+    foreach ($keys as $key) {
+      $Installed = $this->installedIndex->getIV($key);
+      if (! $Installed) {
+        throw new Exception("Not installed: $key");
+      }
+
+      $this->_install($key, null, false, $Installed->is_symlink);
+    }
   }
 
   function uninstall(string $key) {

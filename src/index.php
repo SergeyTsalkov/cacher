@@ -9,6 +9,7 @@ class CacherIndex {
   private ?string $username=null;
   private string $table='items';
   private string $type;
+  private ?KeyCache $KeyCache=null;
 
   function __construct(string $type, $handle, ?string $username=null) {
     $this->type = $type;
@@ -38,6 +39,11 @@ class CacherIndex {
     }
     else {
       throw new Exception("CacherIndex expects a MeekroDB object or sqlite filename");
+    }
+
+    if ($this->isRemote()) {
+      $this->KeyCache = new KeyCache();
+      // $this->db->debugMode();
     }
 
     $tables = $this->db->tableList();
@@ -92,6 +98,10 @@ class CacherIndex {
   }
 
   function get(string $key): ?Item {
+    if ($this->KeyCache && ($Item = $this->KeyCache->get($key))) {
+      return $Item;
+    }
+
     $ItemSet = $this->search($key);
     return $ItemSet->get($key);
   }
@@ -136,6 +146,10 @@ class CacherIndex {
       }
 
       $ItemSet->add($result['key'], $IV);
+    }
+
+    if ($this->KeyCache) {
+      $this->KeyCache->add($ItemSet);
     }
 
     return $ItemSet;

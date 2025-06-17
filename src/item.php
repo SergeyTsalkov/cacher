@@ -13,7 +13,7 @@ class ItemSet implements \Iterator, \Countable {
     $this->Items[$key]->add($IV);
   }
 
-  function get(string $key) {
+  function get(string $key): ?Item {
     return $this->Items[$key] ?? null;
   }
 
@@ -54,13 +54,14 @@ class Item implements \Iterator {
       if (is_null($want)) return $Version;
       if ($Version->version == $want) return $Version;
     }
+    return null;
   }
 
-  function versions() {
+  function versions(): array {
     return array_map(fn($IV) => $IV->version, $this->Versions);
   }
 
-  function version() {
+  function version(): string {
     if ($this->Versions) {
       return $this->versions()[0];
     }
@@ -91,5 +92,13 @@ class ItemVersion {
     $this->version = $version;
     $this->path = $path;
     $this->created_at = $created_at;
+  }
+
+  function splitPath(): array {
+    if (preg_match('/\A\w{2}:\/\/(\w+)\/(\S+)\z/', $this->path, $match)) {
+      return [$match[1], $match[2]];
+    }
+
+    throw new Exception("this doesn't look like an S3-like path");
   }
 }
