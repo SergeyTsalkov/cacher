@@ -411,10 +411,7 @@ class Cacher {
   }
 
   private function remove_files(string $basedir, array $files) {
-    if (! is_dir($basedir)) {
-      throw new Exception("$basedir is not a directory");
-    }
-    if (! $files) return;
+    if (!is_dir($basedir) || !$files) return;
 
     $basedir = realpath($basedir);
     $dirs = [];
