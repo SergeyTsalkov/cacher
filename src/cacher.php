@@ -489,6 +489,7 @@ class Cacher {
     if (count($args) > 100) {
       try {
         $tmpfile = tempnam($this->const('CACHER_HOME'), '.rmlist');
+        chmod($tmpfile, 0644);
         file_put_contents($tmpfile, implode("\0", $args) . "\0");
         if (! $quiet) $this->sayf('[sudo %s]: %s %s ... (%d total)', 
           $username, $command, implode(' ', array_slice($args, 0, 10)), count($args));
