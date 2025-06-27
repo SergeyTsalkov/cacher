@@ -36,7 +36,7 @@ class ParsedCommandLine {
     return $this->args[$index] ?? null;
   }
 
-  function args(int $start, int $end=null) {
+  function args(int $start, ?int $end=null) {
     if ($end === null) {
       return array_slice($this->args, $start);
     }
