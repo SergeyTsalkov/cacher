@@ -56,7 +56,7 @@ class Cacher {
     return $Local->version == $Remote->version;
   }
 
-  function push(string $path, string $key, string $version=null) {
+  function push(string $path, string $key, ?string $version=null) {
     if (! is_dir($path)) {
       throw new Exception("$path is not a directory");
     }
@@ -117,7 +117,7 @@ class Cacher {
     $this->say("Pulled $key ($version)");
   }
 
-  function deleteremote(string $key, string $version=null) {
+  function deleteremote(string $key, ?string $version=null) {
     if (is_null($version)) {
       $versions = $this->remoteIndex->versions($key);
       if (! $versions) {
@@ -141,7 +141,7 @@ class Cacher {
     $this->say("Deleted $key ($version) from remote cache");
   }
 
-  function deletelocal(string $key, string $version=null) {
+  function deletelocal(string $key, ?string $version=null) {
     if (is_null($version)) {
       $versions = $this->localIndex->versions($key);
       if (! $versions) {
@@ -206,7 +206,7 @@ class Cacher {
     }
   }
 
-  function remoteinfo(string $match=null, bool $exact = false): array {
+  function remoteinfo(?string $match=null, bool $exact = false): array {
     $results = [];
     $ItemSet = $this->remoteIndex->search($match, !$exact);
     foreach ($ItemSet as $Item) {
@@ -218,7 +218,7 @@ class Cacher {
     return $results;
   }
 
-  function localinfo(string $match=null, bool $exact = false): array {
+  function localinfo(?string $match=null, bool $exact = false): array {
     $Local = $this->localIndex->search($match, !$exact);
     $Remote = $this->remoteIndex->search($Local->keys());
 

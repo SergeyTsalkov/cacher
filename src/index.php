@@ -106,7 +106,7 @@ class CacherIndex {
     return $ItemSet->get($key);
   }
 
-  function getIV(string $key, string $version=null): ?ItemVersion {
+  function getIV(string $key, ?string $version=null): ?ItemVersion {
     $Item = $this->get($key);
     if ($Item) return $Item->get($version);
     return null;
