@@ -484,9 +484,22 @@ class Cacher {
     return $Lock;
   }
 
-  private function sudo(string $username, string $command, array $args) {
-    $args = array_map('escapeshellarg', $args);
-    $command = array_merge([$command], $args);
+   function sudo(string $username, string $command, array $args=[], bool $quiet=false) {
+
+    if (count($args) > 100) {
+      try {
+        $tmpfile = tempnam($this->const('CACHER_HOME'), '.rmlist');
+        file_put_contents($tmpfile, implode("\0", $args) . "\0");
+        if (! $quiet) $this->sayf('[sudo %s]: %s %s ... (%d total)', 
+          $username, $command, implode(' ', array_slice($args, 0, 10)), count($args));
+        return $this->sudo($username, "xargs -0 $command < $tmpfile", [], true);
+      }
+      finally {
+        if ($tmpfile) unlink($tmpfile);
+      }
+    }
+
+    $command = array_merge([$command], array_map('escapeshellarg', $args));
     $command = implode(' ', $command);
 
     if (! defined('CACHER_IS_DEVELOPMENT')) {
@@ -496,13 +509,11 @@ class Cacher {
       if (! posix_getpwnam($username)) {
         throw new Exception("Unable to sudo to $username: user does not exist");
       }
-
-      $this->sayf('[sudo %s]: %s', $username, $command);
+      
       $command = sprintf('sudo -Hn -u %s bash -c %s', escapeshellarg($username), escapeshellarg($command));
-    } else {
-      $this->say($command);
     }
 
+    if (! $quiet) $this->sayf('[sudo %s]: %s', $username, $command);
     shell_exec($command);
   }
 
