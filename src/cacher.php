@@ -2,7 +2,7 @@
 namespace Cacher2;
 use Symfony\Component\Filesystem\Filesystem;
 use Symfony\Component\Lock\LockFactory;
-use Symfony\Component\Lock\Store\PdoStore;
+use Symfony\Component\Lock\Store\FlockStore;
 use \Exception;
 use \MeekroDB;
 use \Aws\S3\S3Client;
@@ -478,7 +478,14 @@ class Cacher {
   }
 
   private function lock(string $name) {
-    $Factory = new LockFactory(new PdoStore($this->localIndex->pdo()));
+    static $Factory;
+
+    if (! $Factory) {
+      $lock_dir = $this->path_join($this->const('CACHER_HOME'), '.locks');
+      if (! is_dir($lock_dir)) mkdir($lock_dir, 0700, true);
+      $Factory = new LockFactory(new FlockStore($lock_dir));
+    }
+    
     $Lock = $Factory->createLock($name);
     $Lock->acquire(true);
     return $Lock;
