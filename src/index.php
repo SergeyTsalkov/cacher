@@ -173,6 +173,10 @@ class CacherIndex {
     if ($version) $match['version'] = $version;
 
     $this->db->delete($this->table, $match);
+
+    if ($this->KeyCache) {
+      $this->KeyCache->remove($key);
+    }
   }
 
   // if a given version has been available for at least 24 hours, any older versions

@@ -13,4 +13,8 @@ class KeyCache {
   function get(string $key): ?Item {
     return $this->map[$key] ?? null;
   }
+
+  function remove(string $key) {
+    unset($this->map[$key]);
+  }
 }
