@@ -58,6 +58,9 @@ class Cacher {
   }
 
   function push(string $path, string $key, ?string $version=null) {
+    if (! $this->is_available('lz4')) {
+      throw new Exception('lz4 is not available');
+    }
     if (! is_dir($path)) {
       throw new Exception("$path is not a directory");
     }
@@ -73,13 +76,22 @@ class Cacher {
     if ($this->remoteIndex->getIV($key, $version)) {
       throw new Exception("Remote cache already has $key ($version)");
     }
-    
+
     $remote_path = $this->remote_path($key, $version);
-    $Manager = new \Aws\S3\Transfer($this->s3, $path, $remote_path);
-    $Manager->transfer();
+
+    try {
+      $lzdir = $this->mktempdir('lz4');
+      $lzfile = $this->path_join($lzdir, '_extract.tar.lz4');
+      $this->run("tar -C $path -cf - . | lz4 -q - $lzfile");
+      $Manager = new \Aws\S3\Transfer($this->s3, $lzdir, $remote_path);
+      $Manager->transfer();
+
+    } finally {
+      $this->filesystem()->remove($lzdir);
+    }
 
     $this->remoteIndex->add($key, $version, $remote_path);
-    $this->say("Pushed $key ($version) to $remote_path");
+    $this->say("Pushed $key ($version)");
   }
 
   function pull(string $key) {
@@ -105,8 +117,7 @@ class Cacher {
     
     $local_path = $this->local_path($key, $version);
     if (is_dir($local_path) || file_exists($local_path)) {
-      $fs = new Filesystem();
-      $fs->remove($local_path);
+      $this->filesystem()->remove($local_path);
     }
 
     $StartedAt = Carbon::now();
@@ -116,6 +127,22 @@ class Cacher {
     $Manager->transfer();
 
     $files = $this->list_files($local_path);
+
+    $extract_filename = '_extract.tar.lz4';
+    if (count($files) == 1 && $files[0] == $extract_filename) {
+      try {
+        $tmpdir = $this->mktempdir('lz4extract');
+        $old = $this->path_join($local_path, $extract_filename);
+        $new = $this->path_join($tmpdir, $extract_filename);
+        rename($old, $new);
+        $this->run("lz4 -d $new - | tar -C $local_path --no-same-owner --no-same-permissions -xf -");
+        $files = $this->list_files($local_path);
+
+      } finally {
+        $this->filesystem()->remove($tmpdir);
+      }
+    }
+
     $this->localIndex->add($key, $version, $local_path, $files);
     $this->sayf("Pulled %s (%s) in %s", $key, $version, $StartedAt->shortAbsoluteDiffForHumans(2));
   }
@@ -161,8 +188,7 @@ class Cacher {
       throw new Exception("Item $key ($version) does not exist in local cache");
     }
 
-    $fs = new Filesystem();
-    $fs->remove($Item->path);
+    $this->filesystem()->remove($Item->path);
     $this->localIndex->delete($key, $version);
     $this->say("Deleted $key ($version) from local cache");
   }
@@ -484,9 +510,7 @@ class Cacher {
     static $Factory;
 
     if (! $Factory) {
-      $lock_dir = $this->path_join($this->const('CACHER_HOME'), '.locks');
-      if (! is_dir($lock_dir)) mkdir($lock_dir, 0700, true);
-      $Factory = new LockFactory(new FlockStore($lock_dir));
+      $Factory = new LockFactory(new FlockStore($this->tmp_dir()));
     }
     
     $Lock = $Factory->createLock($name);
@@ -494,7 +518,27 @@ class Cacher {
     return $Lock;
   }
 
-   function sudo(string $username, string $command, array $args=[], bool $quiet=false) {
+  function tmp_dir() {
+    $tmp_dir = $this->path_join($this->const('CACHER_HOME'), '.tmp');
+    if (! is_dir($tmp_dir)) mkdir($tmp_dir, 0700);
+    return $tmp_dir;
+  }
+
+  function mktempdir(string $prefix='') {
+    $dir = $this->path_join($this->tmp_dir(), uniqid($prefix));
+    mkdir($dir, 0700);
+    return $dir;
+  }
+
+  function filesystem() {
+    static $fs;
+    if (! $fs) {
+      $fs = new Filesystem();
+    }
+    return $fs;
+  }
+
+  function sudo(?string $username, string $command, array $args=[], bool $quiet=false) {
 
     if (count($args) > 100) {
       try {
@@ -513,7 +557,7 @@ class Cacher {
     $command = array_merge([$command], array_map('escapeshellarg', $args));
     $command = implode(' ', $command);
 
-    if (! defined('CACHER_IS_DEVELOPMENT')) {
+    if (!is_null($username) && !defined('CACHER_IS_DEVELOPMENT')) {
       if (posix_geteuid() != 0) {
         throw new Exception("Unable to sudo to $username: we are not root");
       }
@@ -522,10 +566,22 @@ class Cacher {
       }
       
       $command = sprintf('sudo -Hn -u %s bash -c %s', escapeshellarg($username), escapeshellarg($command));
+      if (! $quiet) $this->sayf('[sudo %s]: %s', $username, $command);
+    } else {
+      if (! $quiet) $this->sayf('[run]: %s', $command);
     }
+    
+    return shell_exec($command);
+  }
 
-    if (! $quiet) $this->sayf('[sudo %s]: %s', $username, $command);
-    shell_exec($command);
+  function run(string $command, array $args=[], bool $quiet=false): string {
+    $result = $this->sudo(null, $command, $args, $quiet);
+    return strval($result);
+  }
+
+  function is_available(string $program): bool {
+    $result = $this->run('which', [$program], true);
+    return !!trim($result);
   }
 
   function sayf(string $str, string ...$args) {
