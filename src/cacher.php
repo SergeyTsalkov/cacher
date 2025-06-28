@@ -1,5 +1,6 @@
 <?php
 namespace Cacher2;
+use Carbon\Carbon;
 use Symfony\Component\Filesystem\Filesystem;
 use Symfony\Component\Lock\LockFactory;
 use Symfony\Component\Lock\Store\FlockStore;
@@ -108,13 +109,15 @@ class Cacher {
       $fs->remove($local_path);
     }
 
+    $StartedAt = Carbon::now();
+    $this->sayf("Pulling %s (%s)...", $key, $version);
     mkdir($local_path, 0755, true);
     $Manager = new \Aws\S3\Transfer($this->s3, $Remote->path, $local_path);
     $Manager->transfer();
 
     $files = $this->list_files($local_path);
     $this->localIndex->add($key, $version, $local_path, $files);
-    $this->say("Pulled $key ($version)");
+    $this->sayf("Pulled %s (%s) in %s", $key, $version, $StartedAt->shortAbsoluteDiffForHumans(2));
   }
 
   function deleteremote(string $key, ?string $version=null) {
