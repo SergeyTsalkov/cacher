@@ -4,6 +4,7 @@ use Carbon\Carbon;
 use Symfony\Component\Filesystem\Filesystem;
 use Symfony\Component\Lock\LockFactory;
 use Symfony\Component\Lock\Store\FlockStore;
+use Symfony\Component\Process\Process;
 use \Exception;
 use \MeekroDB;
 use \Aws\S3\S3Client;
@@ -448,19 +449,35 @@ class Cacher {
     $basedir = realpath($basedir);
     $dirs = [];
     foreach ($files as &$file) {
-      $file = $this->path_join($basedir, $file);
-      $dir = realpath(dirname($file));
-      if ($basedir != $dir) {
-        $dirs[] = $dir;
+      // all_dirnames() should get relative path, so it'll only return all dirs up to our basedir
+      foreach ($this->all_dirnames($file) as $dir) {
+        $dirs[] = realpath($this->path_join($basedir, $dir));
       }
+
+      $file = $this->path_join($basedir, $file);
     }
-    $this->sudo($this->username, 'rm -f', $files);
+
+    $this->longsudo($this->username, 'rm -f', $files);
 
     $dirs = array_unique($dirs);
-    $dirs = array_filter($dirs, fn($dir) => $this->dir_is_empty($dir));
-    if ($dirs) {
-      $this->sudo($this->username, 'rmdir', $dirs);
+    while (true) {
+      $dirs_to_remove = array_filter($dirs, fn($dir) => $this->dir_is_empty($dir));
+      if (! $dirs_to_remove) break;
+
+      $this->longsudo($this->username, 'rmdir', $dirs_to_remove);
+      $dirs = array_diff($dirs, $dirs_to_remove);
     }
+  }
+
+  private function all_dirnames(string $filename) {
+    $names = [];
+    $i = 1;
+    while (true) {
+      $dir = dirname($filename, $i++);
+      if ($dir != '.') $names[] = $dir;
+      else break;
+    }
+    return $names;
   }
 
   private function item2path(string $key) {
@@ -541,26 +558,24 @@ class Cacher {
     return $fs;
   }
 
-  function sudo(?string $username, string $command, array $args=[], bool $quiet=false) {
-
-    if (count($args) > 100) {
-      try {
-        $tmpfile = tempnam($this->const('CACHER_HOME'), '.rmlist');
-        chmod($tmpfile, 0644);
-        file_put_contents($tmpfile, implode("\0", $args) . "\0");
-        if (! $quiet) $this->sayf('[sudo %s]: %s %s ... (%d total)', 
-          $username, $command, implode(' ', array_slice($args, 0, 10)), count($args));
-        return $this->sudo($username, "xargs -0 $command < $tmpfile", [], true);
-      }
-      finally {
-        if ($tmpfile) unlink($tmpfile);
-      }
+  function longsudo(string $username, string $command, array $args=[]) {
+    try {
+      $tmpfile = tempnam($this->const('CACHER_HOME'), '.rmlist');
+      chmod($tmpfile, 0644);
+      file_put_contents($tmpfile, implode("\0", $args) . "\0");
+      $this->sayf_debug('[longsudo %s]: %s %s ... (%d total)', 
+        $username, $command, implode(' ', array_slice($args, 0, 10)), count($args));
+      return $this->sudo($username, "xargs -0 $command < $tmpfile");
     }
+    finally {
+      if ($tmpfile) unlink($tmpfile);
+    }
+  }
 
-    $command = array_merge([$command], array_map('escapeshellarg', $args));
-    $command = implode(' ', $command);
+  function sudo(string $username, string $command, array $args=[]) {
+    $full_command = implode(' ', [$command, ...array_map('escapeshellarg', $args)]);
 
-    if (!is_null($username) && !defined('CACHER_IS_DEVELOPMENT')) {
+    if (!defined('CACHER_IS_DEVELOPMENT')) {
       if (posix_geteuid() != 0) {
         throw new Exception("Unable to sudo to $username: we are not root");
       }
@@ -568,23 +583,43 @@ class Cacher {
         throw new Exception("Unable to sudo to $username: user does not exist");
       }
       
-      $command = sprintf('sudo -Hn -u %s bash -c %s', escapeshellarg($username), escapeshellarg($command));
-      if (! $quiet) $this->sayf('[sudo %s]: %s', $username, $command);
-    } else {
-      if (! $quiet) $this->sayf('[run]: %s', $command);
+      $this->sayf_debug('[sudo %s]: %s', $username, $full_command);
+      return $this->run('sudo', ['-Hn', '-u', $username, 'bash', '-c', $full_command]);
     }
     
-    return shell_exec($command);
+    $this->sayf_debug('[fakesudo %s]: %s', $username, $full_command);
+    return $this->run($full_command);
   }
 
-  function run(string $command, array $args=[], bool $quiet=false): string {
-    $result = $this->sudo(null, $command, $args, $quiet);
-    return strval($result);
+  function run(string $command, array $args=[]): string {
+    $full_command = implode(' ', [$command, ...array_map('escapeshellarg', $args)]);
+    $this->say_debug('[run]:', $full_command);
+    
+    $Process = Process::fromShellCommandline($full_command);
+    $Process->mustRun();
+
+    $output = $Process->getOutput() . "\n" . $Process->getErrorOutput();
+    $output = trim($output);
+    return $output;
   }
 
   function is_available(string $program): bool {
-    $result = $this->run('which', [$program], true);
-    return !!trim($result);
+    try {
+      $this->run('which', [$program], true);
+    } catch (Exception $e) {
+      return false;
+    }
+    
+    return true;
+  }
+
+  function say_debug(string ...$messages) {
+    if (!defined('CACHER_IS_DEVELOPMENT')) return;
+    return $this->say(...$messages);
+  }
+
+  function sayf_debug(string $str, string ...$args) {
+    return $this->say_debug(sprintf($str, ...$args));
   }
 
   function sayf(string $str, string ...$args) {
@@ -592,11 +627,8 @@ class Cacher {
   }
 
   function say(string ...$messages) {
-    $is_console = php_sapi_name() == 'cli';
-
-    if ($is_console) {
-      echo join(' ', $messages), "\n";
-    }
+    if (php_sapi_name() != 'cli') return;
+    echo join(' ', $messages), "\n";
   }
 
 }

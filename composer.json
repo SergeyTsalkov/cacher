@@ -23,6 +23,7 @@
         "aws/aws-sdk-php": "3.*",
         "symfony/filesystem": "*",
         "symfony/lock": "*",
+        "symfony/process": "*",
         "nesbot/carbon": "^2.73.0 || ^3.0"
     },
     "config": {
