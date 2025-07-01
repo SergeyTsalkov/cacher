@@ -32,6 +32,9 @@ class Cacher {
         'endpoint' => $endpoint,
         'version' => 'latest',
         'suppress_php_deprecation_warning' => true,
+        'http' => [
+          'connect_timeout' => 20,
+        ],
         'credentials' => [
           'key' => $this->const('CACHER_R2_KEY'),
           'secret' => $this->const('CACHER_R2_SECRET'),
