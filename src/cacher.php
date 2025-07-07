@@ -86,7 +86,7 @@ class Cacher {
     try {
       $lzdir = $this->mktempdir('lz4');
       $lzfile = $this->path_join($lzdir, '_extract.tar.lz4');
-      $this->run("tar -C $path -cf - . | lz4 -q - $lzfile");
+      $this->run("tar --numeric-owner -C $path -cf - . | lz4 -q - $lzfile");
       $Manager = new \Aws\S3\Transfer($this->s3, $lzdir, $remote_path);
       $Manager->transfer();
 
@@ -139,7 +139,10 @@ class Cacher {
         $old = $this->path_join($local_path, $extract_filename);
         $new = $this->path_join($tmpdir, $extract_filename);
         rename($old, $new);
-        $this->run("lz4 -d $new - | tar -C $local_path --no-same-owner --no-same-permissions -xf -");
+
+        // tar files created with -C have a ./ directory with permissions
+        // tar will change the permissions of that directory unless --no-overwrite-dir is used
+        $this->run("lz4 -d $new - | tar -C $local_path --no-same-owner --no-same-permissions --no-overwrite-dir -xf -");
         $files = $this->list_files($local_path);
 
       } finally {
