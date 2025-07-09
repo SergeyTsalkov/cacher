@@ -548,7 +548,7 @@ class Cacher {
   }
 
   function mktempdir(string $prefix='') {
-    $dir = $this->path_join($this->tmp_dir(), uniqid($prefix));
+    $dir = $this->path_join($this->tmp_dir(), uniqid($prefix, true));
     mkdir($dir, 0700);
     return $dir;
   }
