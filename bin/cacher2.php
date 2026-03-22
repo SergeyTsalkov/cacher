@@ -22,7 +22,7 @@ function install(ParsedCommandLine $Cmd) {
   $Cacher = new Cacher($username);
 
   foreach ($keys as $key) {
-    $Cacher->install($key, $path, $Cmd->flag('symlink'));
+    $Cacher->install($key, $path, $Cmd->flag('symlink'), $Cmd->flag('upgrade'));
   }
 }
 
@@ -160,7 +160,7 @@ function help() {
   echo "  remote [search] [--json] [--exact] -- list remote cache items\n\n";
 
   echo "  copy <username> <path> <key1> [key2] ... -- copy item from local cache (like install, but won't be upgraded)\n";
-  echo "  install [--symlink] <username> <path> <key1> [key2] ... -- install item from local cache\n";
+  echo "  install [--symlink] [--upgrade] <username> <path> <key1> [key2] ... -- install item from local cache\n";
   echo "  uninstall <username> <key1> [key2] ... -- uninstall item from local cache\n";
   echo "  upgrade <username> -- upgrade all installed items\n";
   echo "  installed [--json] <username> -- list installed items\n\n";

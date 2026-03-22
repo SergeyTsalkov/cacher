@@ -370,10 +370,10 @@ class Cacher {
     $this->_install($key, $path, true);
   }
 
-  function install(string $key, string $path, $use_symlink=false) {
+  function install(string $key, string $path, $use_symlink=false, bool $upgrade=false) {
     $Lock = $this->lock("username:{$this->username}");
 
-    if ($this->installedIndex->getIV($key)) {
+    if (!$upgrade && $this->installedIndex->getIV($key)) {
       throw new Exception("Already installed: $key");
     }
 
