@@ -160,10 +160,7 @@ function adduser(ParsedCommandLine $Cmd) {
     exit(1);
   }
 
-  $Api = new RemoteApiClient(
-    constant('CACHER2_API_URL'),
-    constant('CACHER2_API_KEY')
-  );
+  $Api = api_client();
   $apiKey = $Api->addUser($name, (int)$level, $world ?: null);
   echo "Created user '$name' (level $level" . ($world ? ", world $world" : "") . ")\n";
   echo "API key: $apiKey\n";
@@ -173,19 +170,13 @@ function deluser(ParsedCommandLine $Cmd) {
   $name = $Cmd->arg(1);
   require_args($name);
 
-  $Api = new RemoteApiClient(
-    constant('CACHER2_API_URL'),
-    constant('CACHER2_API_KEY')
-  );
+  $Api = api_client();
   $Api->delUser($name);
   echo "Deleted user '$name'\n";
 }
 
 function listusers(ParsedCommandLine $Cmd) {
-  $Api = new RemoteApiClient(
-    constant('CACHER2_API_URL'),
-    constant('CACHER2_API_KEY')
-  );
+  $Api = api_client();
   $users = $Api->listUsers();
 
   if (empty($users)) {
@@ -232,4 +223,19 @@ function require_args(...$args) {
       help();
     }
   }
+}
+
+function require_constant(string $name): string {
+  if (!defined($name)) {
+    echo "Error: constant $name is not defined\n";
+    exit(1);
+  }
+  return constant($name);
+}
+
+function api_client(): RemoteApiClient {
+  return new RemoteApiClient(
+    require_constant('CACHER2_API_URL'),
+    require_constant('CACHER2_API_KEY')
+  );
 }
