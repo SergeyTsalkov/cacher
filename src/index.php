@@ -30,7 +30,7 @@ class CacherIndex {
 
     $tables = $this->db->tableList();
     if (count($tables) == 0) {
-      $structure_file = sprintf('%s/../structure-%s.sql', __DIR__, $this->db->dbType());
+      $structure_file = sprintf('%s/../structure-sqlite.sql', __DIR__);
       $structure = file_get_contents($structure_file);
       $queries = array_filter(array_map('trim', explode(';', $structure)));
 
