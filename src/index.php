@@ -130,11 +130,6 @@ class CacherIndex {
     return $Item->versions();
   }
 
-  function version(string $key) {
-    $versions = $this->versions($key);
-    return $versions ? $versions[0] : null;
-  }
-
   function delete(string $key, ?string $version=null) {
     $match = [];
     if ($this->isInstalled()) $match['username'] = $this->username;
@@ -189,10 +184,6 @@ class CacherIndex {
 
     $this->db->query("UPDATE %b SET touched_at=CURRENT_TIMESTAMP
       WHERE `key`=%s AND version=%s", $this->table, $key, $version);
-  }
-
-  function pdo() {
-    return $this->db->get();
   }
 
 }
