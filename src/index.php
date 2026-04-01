@@ -174,7 +174,7 @@ class CacherIndex {
 
       foreach ($Item as $IV) {
         if (version_compare($IV->version, $settled_version) < 0) {
-          $old[] = $IV;
+          $old[] = [$key, $IV->version];
         }
       }
     }

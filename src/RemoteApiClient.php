@@ -20,28 +20,38 @@ class RemoteApiClient {
     ]);
   }
 
-  // Returns ItemSet of all remote items, optionally filtered
-  function search($key=null, bool $substring=false): ItemSet {
+  // List remote items, optionally filtered by prefix or exact key match
+  function search(?string $match=null, bool $substring=false): ItemSet {
     $query = [];
-    if (is_string($key) && $key !== '') {
-      $query['match'] = $key;
+    if ($match !== null && $match !== '') {
+      $query['match'] = $match;
       if (!$substring) $query['exact'] = '1';
-    } else if (is_array($key) && count($key) > 0) {
-      $data = $this->post('items/batch', ['keys' => array_values($key)]);
-      $ItemSet = new ItemSet();
-      foreach ($data['items'] as $row) {
-        $IV = new ItemVersion($row['version'], '', (int)$row['created_at']);
-        $IV->key = $row['key'];
-        $ItemSet->add($row['key'], $IV);
-      }
-      return $ItemSet;
     }
 
     $data = $this->get('items', $query);
+    return $this->itemSetFromRows($data['items']);
+  }
+
+  // Fetch the latest version for a specific set of keys, in one or more batch requests
+  function fetchKeys(array $keys): ItemSet {
+    if (empty($keys)) return new ItemSet();
+
     $ItemSet = new ItemSet();
-    foreach ($data['items'] as $row) {
+    foreach (array_chunk(array_values($keys), 1000) as $chunk) {
+      $data = $this->post('items/batch', ['keys' => $chunk]);
+      foreach ($this->itemSetFromRows($data['items']) as $Item) {
+        foreach ($Item as $IV) {
+          $ItemSet->add($Item->key, $IV);
+        }
+      }
+    }
+    return $ItemSet;
+  }
+
+  private function itemSetFromRows(array $rows): ItemSet {
+    $ItemSet = new ItemSet();
+    foreach ($rows as $row) {
       $IV = new ItemVersion($row['version'], '', (int)$row['created_at']);
-      $IV->key = $row['key'];
       $ItemSet->add($row['key'], $IV);
     }
     return $ItemSet;
@@ -69,9 +79,7 @@ class RemoteApiClient {
 
     foreach ($data['versions'] as $v) {
       if (is_null($version) || $v['version'] === $version) {
-        $IV = new ItemVersion($v['version'], '', (int)$v['created_at']);
-        $IV->key = $key;
-        return $IV;
+        return new ItemVersion($v['version'], '', (int)$v['created_at']);
       }
     }
     return null;

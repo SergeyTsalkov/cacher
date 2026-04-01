@@ -44,7 +44,6 @@ class Item implements \Iterator {
   }
 
   function add(ItemVersion $Version) {
-    $Version->key = $this->key;
     $this->Versions[] = $Version;
     usort($this->Versions, fn($a, $b) => version_compare($b->version, $a->version));
   }
@@ -80,7 +79,6 @@ class Item implements \Iterator {
 }
 
 class ItemVersion {
-  public string $key;
   public string $version;
   public string $path;
   public int $created_at;

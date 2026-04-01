@@ -196,22 +196,19 @@ class Cacher {
       foreach ($Installed as $Item) {
         foreach ($Item as $IV) {
           if (!is_dir($IV->path)) {
-            $this->sayf("Deleting dead installed item: %s (%s)", $IV->key, $user);
-            $this->installedIndex->delete($IV->key);
+            $this->sayf("Deleting dead installed item: %s (%s)", $Item->key, $user);
+            $this->installedIndex->delete($Item->key);
             continue;
           }
 
           if ($IV->is_symlink) {
-            $used[$IV->key][$IV->version] = true;
+            $used[$Item->key][$IV->version] = true;
           }
         }
       }
     }
 
-    foreach ($this->localIndex->old() as $IV) {
-      $key = $IV->key;
-      $version = $IV->version;
-
+    foreach ($this->localIndex->old() as [$key, $version]) {
       if (isset($used[$key][$version])) continue;
       $this->deletelocal($key, $version);
     }
@@ -239,7 +236,7 @@ class Cacher {
 
   function localinfo(?string $match=null, bool $exact = false): array {
     $Local = $this->localIndex->search($match, !$exact);
-    $Remote = $this->remoteApi->search($Local->keys());
+    $Remote = $this->remoteApi->fetchKeys($Local->keys());
 
     $results = [];
     foreach ($Local as $LocalItem) {
@@ -262,7 +259,7 @@ class Cacher {
   function installedinfo(): array {
     $Installed = $this->installedIndex->search();
     $Local = $this->localIndex->search($Installed->keys());
-    $Remote = $this->remoteApi->search($Installed->keys());
+    $Remote = $this->remoteApi->fetchKeys($Installed->keys());
 
     $results = [];
     foreach ($Installed as $Item) {
@@ -378,7 +375,7 @@ class Cacher {
       throw new Exception("invalid argument");
     }
 
-    $RemoteItems = $this->remoteApi->search($keys);
+    $RemoteItems = $this->remoteApi->fetchKeys($keys);
 
     foreach ($keys as $key) {
       $Installed = $this->installedIndex->getIV($key);
