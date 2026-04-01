@@ -84,7 +84,7 @@ function push(ParsedCommandLine $Cmd) {
 function pull(ParsedCommandLine $Cmd) {
   $keys = $Cmd->args(1);
   require_args($keys[0]);
-  
+
   $Cacher = new Cacher();
   foreach ($keys as $key) {
     $Cacher->pull($key);
@@ -151,8 +151,58 @@ function cleanremote(ParsedCommandLine $Cmd) {
   $Cacher->cleanremote();
 }
 
+function adduser(ParsedCommandLine $Cmd) {
+  list($name, $level, $world) = $Cmd->args(1, 3);
+  require_args($name, $level);
+
+  if (!is_numeric($level) || !in_array((int)$level, [1, 2, 3])) {
+    echo "Level must be 1, 2, or 3\n";
+    exit(1);
+  }
+
+  $Api = new RemoteApiClient(
+    constant('CACHER2_API_URL'),
+    constant('CACHER2_API_KEY')
+  );
+  $apiKey = $Api->addUser($name, (int)$level, $world ?: null);
+  echo "Created user '$name' (level $level" . ($world ? ", world $world" : "") . ")\n";
+  echo "API key: $apiKey\n";
+}
+
+function deluser(ParsedCommandLine $Cmd) {
+  $name = $Cmd->arg(1);
+  require_args($name);
+
+  $Api = new RemoteApiClient(
+    constant('CACHER2_API_URL'),
+    constant('CACHER2_API_KEY')
+  );
+  $Api->delUser($name);
+  echo "Deleted user '$name'\n";
+}
+
+function listusers(ParsedCommandLine $Cmd) {
+  $Api = new RemoteApiClient(
+    constant('CACHER2_API_URL'),
+    constant('CACHER2_API_KEY')
+  );
+  $users = $Api->listUsers();
+
+  if (empty($users)) {
+    echo "No users found.\n";
+    return;
+  }
+
+  foreach ($users as $user) {
+    echo sprintf("%s (level %d, world: %s)\n", $user['name'], $user['level'], $user['world']);
+  }
+}
+
 function help() {
   echo "Usage: cacher2 <command> [options]\n";
+  echo "\n";
+  echo "Required environment (CACHER_HOME, CACHER2_API_URL, CACHER2_API_KEY)\n";
+  echo "\n";
   echo "Commands:\n";
   echo "  push <path> <key> [version] -- push new item to remote cache\n";
   echo "  pull <key1> [key2] ... -- pull item from remote to local cache\n";
@@ -168,7 +218,11 @@ function help() {
   echo "  cleanlocal -- delete old local items\n";
   echo "  cleanremote -- delete old remote items\n";
   echo "  deletelocal <key> [version] - delete item from local cache\n";
-  echo "  deleteremote <key> [version] - delete item from remote cache\n";
+  echo "  deleteremote <key> [version] - delete item from remote cache\n\n";
+
+  echo "  adduser <name> <level> [world] -- create a new API user (level 1-3)\n";
+  echo "  deluser <name> -- delete an API user\n";
+  echo "  listusers -- list all API users\n";
   die();
 }
 

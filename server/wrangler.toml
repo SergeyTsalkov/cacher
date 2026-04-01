@@ -1,0 +1,17 @@
+name = "cacher2"
+main = "src/index.ts"
+compatibility_date = "2025-01-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "cacher2"
+database_id = "8175ca2c-c339-460a-b83b-b093a8a19c5b"
+
+[vars]
+CACHER2_WORLDS = '{"dev":"cacher2-dev"}'
+
+# Secrets (set via `wrangler secret put`):
+# CACHER2_ROOT_API_KEY
+# CACHER2_R2_ACCOUNT_ID
+# CACHER2_R2_ACCESS_KEY_ID
+# CACHER2_R2_SECRET_ACCESS_KEY

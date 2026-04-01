@@ -1,0 +1,17 @@
+{
+  "name": "cacher2-server",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:init": "wrangler d1 execute cacher2 --file=schema.sql",
+    "db:init:remote": "wrangler d1 execute cacher2 --remote --file=schema.sql"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.0.0",
+    "hono": "^4.0.0",
+    "typescript": "^5.0.0",
+    "wrangler": "^4.79.0"
+  }
+}

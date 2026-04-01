@@ -1,49 +1,31 @@
 <?php
 namespace Cacher2;
 use \Exception;
-use \MeekroDB;
-use \WhereClause;
 
 class CacherIndex {
   private $db;
   private ?string $username=null;
   private string $table='items';
   private string $type;
-  private ?KeyCache $KeyCache=null;
 
   function __construct(string $type, $handle, ?string $username=null) {
     $this->type = $type;
-    if (!in_array($type, ['remote', 'local', 'installed'])) {
+    if (!in_array($type, ['local', 'installed'])) {
       throw new Exception("invalid index type");
     }
     if ($this->isInstalled()) {
       $this->username = $username;
       $this->table = 'installed';
     }
-    
-    if ($handle instanceof MeekroDB) {
-      if (!$this->isRemote()) {
-        throw new Exception("MeekroDB handle only appropriate for remote index");
-      }
-      $this->db = $handle;
-    }
-    else if (is_string($handle)) {
-      if ($this->isRemote()) {
-        throw new Exception("string handle not appropriate for remote index");
-      }
 
+    if (is_string($handle)) {
       if (! file_exists($handle)) touch($handle);
       chmod($handle, 0600);
 
-      $this->db = new MeekroDB("sqlite:$handle");
+      $this->db = new \MeekroDB("sqlite:$handle");
     }
     else {
-      throw new Exception("CacherIndex expects a MeekroDB object or sqlite filename");
-    }
-
-    if ($this->isRemote()) {
-      $this->KeyCache = new KeyCache();
-      // $this->db->debugMode();
+      throw new Exception("CacherIndex expects a sqlite filename");
     }
 
     $tables = $this->db->tableList();
@@ -58,7 +40,6 @@ class CacherIndex {
     }
   }
 
-  function isRemote() { return $this->type == 'remote'; }
   function isLocal() { return $this->type == 'local'; }
   function isInstalled() { return $this->type == 'installed'; }
 
@@ -98,10 +79,6 @@ class CacherIndex {
   }
 
   function get(string $key): ?Item {
-    if ($this->KeyCache && ($Item = $this->KeyCache->get($key))) {
-      return $Item;
-    }
-
     $ItemSet = $this->search($key);
     return $ItemSet->get($key);
   }
@@ -115,12 +92,12 @@ class CacherIndex {
   function search($key=null, bool $substring=false): ItemSet {
     $ItemSet = new ItemSet();
 
-    $Where = new WhereClause('and');
+    $Where = new \WhereClause('and');
     if ($this->isInstalled()) $Where->add('username=%s', $this->username);
-    
+
     if (is_string($key)) {
       if (strlen($key) == 0) return $ItemSet;
-      if ($substring) $Where->add('`key` LIKE %s', $key . '%'); 
+      if ($substring) $Where->add('`key` LIKE %s', $key . '%');
       else $Where->add('`key`=%s', $key);
     }
     else if (is_array($key)) {
@@ -131,11 +108,7 @@ class CacherIndex {
       throw new Exception("key must be string, array, or null");
     }
 
-    if ($this->db->dbType() == 'sqlite') {
-      $ts_block = "strftime('%s', created_at) as created_at_ts";
-    } else {
-      $ts_block = "unix_timestamp(created_at) as created_at_ts";
-    }
+    $ts_block = "strftime('%s', created_at) as created_at_ts";
 
     $results = $this->db->query("SELECT *,%l FROM %b WHERE %l", $ts_block, $this->table, $Where);
     foreach ($results as $result) {
@@ -146,10 +119,6 @@ class CacherIndex {
       }
 
       $ItemSet->add($result['key'], $IV);
-    }
-
-    if ($this->KeyCache) {
-      $this->KeyCache->add($ItemSet);
     }
 
     return $ItemSet;
@@ -173,10 +142,6 @@ class CacherIndex {
     if ($version) $match['version'] = $version;
 
     $this->db->delete($this->table, $match);
-
-    if ($this->KeyCache) {
-      $this->KeyCache->remove($key);
-    }
   }
 
   // if a given version has been available for at least 24 hours, any older versions
@@ -222,7 +187,7 @@ class CacherIndex {
       throw new Exception("touch() only works on localIndex");
     }
 
-    $this->db->query("UPDATE %b SET touched_at=CURRENT_TIMESTAMP 
+    $this->db->query("UPDATE %b SET touched_at=CURRENT_TIMESTAMP
       WHERE `key`=%s AND version=%s", $this->table, $key, $version);
   }
 

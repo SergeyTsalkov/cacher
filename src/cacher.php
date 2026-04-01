@@ -6,55 +6,34 @@ use Symfony\Component\Lock\LockFactory;
 use Symfony\Component\Lock\Store\FlockStore;
 use Symfony\Component\Process\Process;
 use \Exception;
-use \MeekroDB;
-use \Aws\S3\S3Client;
 use \RecursiveIteratorIterator;
 use \RecursiveDirectoryIterator;
 use \FilesystemIterator;
 
 
 class Cacher {
-  private $s3;
+  private RemoteApiClient $remoteApi;
   private ?string $username;
-  private $remoteIndex;
   private $localIndex;
   private $installedIndex;
 
   function __construct(?string $username=null) {
-    $db = new MeekroDB(
-      $this->const('CACHER_DB_DSN'), 
-      $this->const('CACHER_DB_USER'), 
-      $this->const('CACHER_DB_PASS')
-    );
-
-    $endpoint = sprintf('https://%s.r2.cloudflarestorage.com', $this->const('CACHER_R2_ACCOUNT'));
-    $this->s3 = new S3Client([
-        'region'  => 'auto',
-        'endpoint' => $endpoint,
-        'version' => 'latest',
-        'suppress_php_deprecation_warning' => true,
-        'http' => [
-          'connect_timeout' => 20,
-        ],
-        'credentials' => [
-          'key' => $this->const('CACHER_R2_KEY'),
-          'secret' => $this->const('CACHER_R2_SECRET'),
-        ],
-    ]);
-
     $home = $this->const('CACHER_HOME');
     if (! is_dir($home)) @mkdir($home, 0755, true);
     if (! is_dir($home)) throw new Exception("CACHER_HOME dir ($home) doesn't exist");
 
     $this->username = $username;
     $local_index_file = $this->path_join($home, '.cacher2');
-    $this->remoteIndex = new CacherIndex('remote', $db);
+    $this->remoteApi = new RemoteApiClient(
+      $this->const('CACHER2_API_URL'),
+      $this->const('CACHER2_API_KEY')
+    );
     $this->localIndex = new CacherIndex('local', $local_index_file);
     $this->installedIndex = new CacherIndex('installed', $local_index_file, $username);
   }
 
   function localUpToDate(string $key) {
-    $Remote = $this->remoteIndex->getIV($key);
+    $Remote = $this->remoteApi->getIV($key);
     $Local = $this->localIndex->getIV($key);
 
     if (!$Local || !$Remote) return false;
@@ -76,37 +55,42 @@ class Cacher {
     }
 
     if (! $version) $version = time();
+    $version = (string)$version;
 
-    if ($this->remoteIndex->getIV($key, $version)) {
-      throw new Exception("Remote cache already has $key ($version)");
-    }
-
-    $remote_path = $this->remote_path($key, $version);
+    $initResult = $this->remoteApi->pushInit($key, $version);
 
     try {
       $lzdir = $this->mktempdir('lz4');
       $lzfile = $this->path_join($lzdir, '_extract.tar.lz4');
       $this->run("tar --numeric-owner -C $path -cf - . | lz4 -q - $lzfile");
-      $Manager = new \Aws\S3\Transfer($this->s3, $lzdir, $remote_path);
-      $Manager->transfer();
+
+      $httpClient = new \GuzzleHttp\Client();
+      $httpClient->put($initResult['upload_url'], [
+        'body' => fopen($lzfile, 'r'),
+        'headers' => [
+          'Content-Type' => 'application/octet-stream',
+          'Content-Length' => filesize($lzfile),
+        ],
+        'timeout' => 300,
+      ]);
 
     } finally {
       $this->filesystem()->remove($lzdir);
     }
 
-    $this->remoteIndex->add($key, $version, $remote_path);
+    $this->remoteApi->pushConfirm($key, $version);
     $this->say("Pushed $key ($version)");
   }
 
   function pull(string $key) {
     $Lock = $this->lock("key:$key");
 
-    $Remote = $this->remoteIndex->getIV($key);
-    if (! $Remote) {
+    $pullInfo = $this->remoteApi->pullInfo($key);
+    if (! $pullInfo) {
       throw new Exception("Item $key does not exist in the cache");
     }
 
-    $version = $Remote->version;
+    $version = $pullInfo['version'];
     $local_versions = $this->localIndex->versions($key);
     foreach ($local_versions as $local_version) {
       if (version_compare($local_version, $version) > 0) {
@@ -118,7 +102,7 @@ class Cacher {
         return;
       }
     }
-    
+
     $local_path = $this->local_path($key, $version);
     if (is_dir($local_path) || file_exists($local_path)) {
       $this->filesystem()->remove($local_path);
@@ -127,8 +111,14 @@ class Cacher {
     $StartedAt = Carbon::now();
     $this->sayf("Pulling %s (%s)...", $key, $version);
     mkdir($local_path, 0755, true);
-    $Manager = new \Aws\S3\Transfer($this->s3, $Remote->path, $local_path);
-    $Manager->transfer();
+
+    $lzfile = $this->path_join($local_path, '_extract.tar.lz4');
+
+    $httpClient = new \GuzzleHttp\Client();
+    $httpClient->get($pullInfo['download_url'], [
+      'sink' => $lzfile,
+      'timeout' => 300,
+    ]);
 
     $files = $this->list_files($local_path);
 
@@ -156,7 +146,7 @@ class Cacher {
 
   function deleteremote(string $key, ?string $version=null) {
     if (is_null($version)) {
-      $versions = $this->remoteIndex->versions($key);
+      $versions = $this->remoteApi->versions($key);
       if (! $versions) {
         throw new Exception("Item $key does not exist in remote cache");
       }
@@ -166,15 +156,7 @@ class Cacher {
       return;
     }
 
-    $Item = $this->remoteIndex->getIV($key, $version);
-    if (!$Item) {
-      throw new Exception("Item $key ($version) does not exist in remote cache");
-    }
-
-    // trailing slash is important so that path/1 doesn't match path/11
-    list($bucket, $remote_path) = $Item->splitPath();
-    $this->s3->deleteMatchingObjects($bucket, $remote_path . '/');
-    $this->remoteIndex->delete($key, $version);
+    $this->remoteApi->deleteItem($key, $version);
     $this->say("Deleted $key ($version) from remote cache");
   }
 
@@ -237,14 +219,15 @@ class Cacher {
 
   function cleanremote() {
     $this->say("Cleaning remote cache..");
-    foreach ($this->remoteIndex->old() as $IV) {
-      $this->deleteremote($IV->key, $IV->version);
+    $deleted = $this->remoteApi->cleanRemote();
+    foreach ($deleted as $item) {
+      $this->say("Deleted $item from remote cache");
     }
   }
 
   function remoteinfo(?string $match=null, bool $exact = false): array {
     $results = [];
-    $ItemSet = $this->remoteIndex->search($match, !$exact);
+    $ItemSet = $this->remoteApi->search($match, !$exact);
     foreach ($ItemSet as $Item) {
       $results[$Item->key] = [
         'version' => $Item->version(),
@@ -256,7 +239,7 @@ class Cacher {
 
   function localinfo(?string $match=null, bool $exact = false): array {
     $Local = $this->localIndex->search($match, !$exact);
-    $Remote = $this->remoteIndex->search($Local->keys());
+    $Remote = $this->remoteApi->search($Local->keys());
 
     $results = [];
     foreach ($Local as $LocalItem) {
@@ -265,7 +248,7 @@ class Cacher {
       if ($RemoteItem = $Remote->get($key)) {
         $remote_version = $RemoteItem->version();
       }
-      
+
       $results[$key] = [
         'local_version' => $LocalItem->version(),
         'remote_version' => $remote_version,
@@ -279,7 +262,7 @@ class Cacher {
   function installedinfo(): array {
     $Installed = $this->installedIndex->search();
     $Local = $this->localIndex->search($Installed->keys());
-    $Remote = $this->remoteIndex->search($Installed->keys());
+    $Remote = $this->remoteApi->search($Installed->keys());
 
     $results = [];
     foreach ($Installed as $Item) {
@@ -318,7 +301,7 @@ class Cacher {
         $path = $InstalledItem->path;
       }
     }
-    
+
     if (!$path) {
       throw new Exception("Path not specified");
     }
@@ -356,7 +339,7 @@ class Cacher {
     } else {
       $this->sudo($this->username, 'rsync', ['-a', $LocalItem->path . '/', $path]);
     }
-    
+
     if (! $copy_only) {
       $this->installedIndex->add($key, $LocalItem->version, $path, $LocalItem->files, $use_symlink);
       $this->say("Installed $key ({$LocalItem->version}) to $path");
@@ -395,8 +378,8 @@ class Cacher {
       throw new Exception("invalid argument");
     }
 
-    // grab all remote info into cache with one query
-    $this->remoteIndex->search($keys);
+    // prefetch all remote info with one batch of requests
+    $this->remoteApi->search($keys);
 
     foreach ($keys as $key) {
       $Installed = $this->installedIndex->getIV($key);
@@ -492,14 +475,6 @@ class Cacher {
     return $path;
   }
 
-  private function remote_path(string $key, string $version, bool $use_simple=false) {
-    $simple_path = $this->path_join($this->item2path($key), $version);
-    if ($use_simple) return $simple_path;
-
-    $cache_path = sprintf('s3://%s/', $this->const('CACHER_R2_BUCKET'));
-    return $this->path_join($cache_path, $simple_path);
-  }
-
   private function local_path(string $key, string $version) {
     return $this->path_join($this->const('CACHER_HOME'), $this->item2path($key), $version);
   }
@@ -519,7 +494,7 @@ class Cacher {
 
   private function path_join(string ...$parts): string {
     if (count($parts) == 0) return '';
-    
+
     foreach ($parts as $i => &$part) {
       if (strlen($part) == 0) throw new Exception("path_join: part can't be empty");
       if ($i == 0) $part = rtrim($part, '/');
@@ -535,7 +510,7 @@ class Cacher {
     if (! $Factory) {
       $Factory = new LockFactory(new FlockStore($this->tmp_dir()));
     }
-    
+
     $Lock = $Factory->createLock($name);
     $Lock->acquire(true);
     return $Lock;
@@ -566,7 +541,7 @@ class Cacher {
       $tmpfile = tempnam($this->const('CACHER_HOME'), '.rmlist');
       chmod($tmpfile, 0644);
       file_put_contents($tmpfile, implode("\0", $args) . "\0");
-      $this->sayf_debug('[longsudo %s]: %s %s ... (%d total)', 
+      $this->sayf_debug('[longsudo %s]: %s %s ... (%d total)',
         $username, $command, implode(' ', array_slice($args, 0, 10)), count($args));
       return $this->sudo($username, "xargs -0 $command < $tmpfile");
     }
@@ -585,11 +560,11 @@ class Cacher {
       if (! posix_getpwnam($username)) {
         throw new Exception("Unable to sudo to $username: user does not exist");
       }
-      
+
       $this->sayf_debug('[sudo %s]: %s', $username, $full_command);
       return $this->run('sudo', ['-Hn', '-u', $username, 'bash', '-c', $full_command]);
     }
-    
+
     $this->sayf_debug('[fakesudo %s]: %s', $username, $full_command);
     return $this->run($full_command);
   }
@@ -597,7 +572,7 @@ class Cacher {
   function run(string $command, array $args=[]): string {
     $full_command = implode(' ', [$command, ...array_map('escapeshellarg', $args)]);
     $this->say_debug('[run]:', $full_command);
-    
+
     $Process = Process::fromShellCommandline($full_command);
     $Process->mustRun();
 
@@ -612,7 +587,7 @@ class Cacher {
     } catch (Exception $e) {
       return false;
     }
-    
+
     return true;
   }
 
