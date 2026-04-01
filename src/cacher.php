@@ -31,7 +31,7 @@ class Cacher {
     );
     $this->httpClient = new \GuzzleHttp\Client([
       'connect_timeout' => 5,
-      'timeout' => 300,
+      'timeout' => 900, // 15 minutes
     ]);
     $this->localIndex = new CacherIndex('local', $local_index_file);
     $this->installedIndex = new CacherIndex('installed', $local_index_file, $username);
