@@ -13,6 +13,7 @@ use \FilesystemIterator;
 
 class Cacher {
   private RemoteApiClient $remoteApi;
+  private \GuzzleHttp\Client $httpClient;
   private ?string $username;
   private $localIndex;
   private $installedIndex;
@@ -28,6 +29,10 @@ class Cacher {
       $this->const('CACHER2_API_URL'),
       $this->const('CACHER2_API_KEY')
     );
+    $this->httpClient = new \GuzzleHttp\Client([
+      'connect_timeout' => 5,
+      'timeout' => 300,
+    ]);
     $this->localIndex = new CacherIndex('local', $local_index_file);
     $this->installedIndex = new CacherIndex('installed', $local_index_file, $username);
   }
@@ -57,21 +62,18 @@ class Cacher {
     if (! $version) $version = time();
     $version = (string)$version;
 
-    $initResult = $this->remoteApi->pushInit($key, $version);
-
     try {
       $lzdir = $this->mktempdir('lz4');
       $lzfile = $this->path_join($lzdir, '_extract.tar.lz4');
       $this->run("tar --numeric-owner -C $path -cf - . | lz4 -q - $lzfile");
 
-      $httpClient = new \GuzzleHttp\Client();
-      $httpClient->put($initResult['upload_url'], [
+      $initResult = $this->remoteApi->pushInit($key, $version);
+      $this->httpClient->put($initResult['upload_url'], [
         'body' => fopen($lzfile, 'r'),
         'headers' => [
           'Content-Type' => 'application/octet-stream',
           'Content-Length' => filesize($lzfile),
         ],
-        'timeout' => 300,
       ]);
 
     } finally {
@@ -114,11 +116,7 @@ class Cacher {
 
     $lzfile = $this->path_join($local_path, '_extract.tar.lz4');
 
-    $httpClient = new \GuzzleHttp\Client();
-    $httpClient->get($pullInfo['download_url'], [
-      'sink' => $lzfile,
-      'timeout' => 300,
-    ]);
+    $this->httpClient->get($pullInfo['download_url'], ['sink' => $lzfile]);
 
     $files = $this->list_files($local_path);
 
@@ -360,20 +358,10 @@ class Cacher {
     $this->_install($key, $path, false, $use_symlink);
   }
 
-  function upgrade($keys=null) {
+  function upgrade(?array $keys=null) {
     $Lock = $this->lock("username:{$this->username}");
 
-    if (is_string($keys)) {
-      $keys = [$keys];
-    }
-    else if (is_null($keys)) {
-      $keys = $this->installedIndex->search()->keys();
-    }
-    else if (is_array($keys)) {
-      // do nothing
-    } else {
-      throw new Exception("invalid argument");
-    }
+    $keys ??= $this->installedIndex->search()->keys();
 
     $RemoteItems = $this->remoteApi->fetchKeys($keys);
 
