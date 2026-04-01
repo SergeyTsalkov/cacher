@@ -255,6 +255,7 @@ class Cacher {
   }
 
   function installedinfo(): array {
+    $this->requireUsername();
     $Installed = $this->installedIndex->search();
     $Local = $this->localIndex->search($Installed->keys());
     $Remote = $this->remoteApi->fetchKeys($Installed->keys());
@@ -344,11 +345,13 @@ class Cacher {
   }
 
   function copy(string $key, string $path) {
+    $this->requireUsername();
     $Lock = $this->lock("username:{$this->username}");
     $this->_install($key, $path, true);
   }
 
   function install(string $key, string $path, $use_symlink=false, bool $upgrade=false) {
+    $this->requireUsername();
     $Lock = $this->lock("username:{$this->username}");
 
     if (!$upgrade && $this->installedIndex->getIV($key)) {
@@ -359,6 +362,7 @@ class Cacher {
   }
 
   function upgrade(?array $keys=null) {
+    $this->requireUsername();
     $Lock = $this->lock("username:{$this->username}");
 
     $keys ??= $this->installedIndex->search()->keys();
@@ -376,6 +380,7 @@ class Cacher {
   }
 
   function uninstall(string $key) {
+    $this->requireUsername();
     $Lock = $this->lock("username:{$this->username}");
 
     $Installed = $this->installedIndex->getIV($key);
@@ -461,6 +466,12 @@ class Cacher {
 
   private function local_path(string $key, string $version) {
     return $this->path_join($this->const('CACHER_HOME'), $this->item2path($key), $version);
+  }
+
+  private function requireUsername() {
+    if ($this->username === null) {
+      throw new Exception("This operation requires a username");
+    }
   }
 
   private function const(string $name) {
