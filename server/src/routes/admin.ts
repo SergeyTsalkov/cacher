@@ -1,4 +1,4 @@
-// TEMPORARY: Migration endpoints — delete this file after migration to D1 is complete.
+// TODO: delete after migration
 // Also remove the admin route from src/index.ts.
 
 import { Hono } from 'hono';

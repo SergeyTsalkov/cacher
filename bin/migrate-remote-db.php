@@ -1,6 +1,6 @@
 #!/usr/bin/env php
 <?php
-// TEMPORARY — delete after migration to D1 is complete
+// TODO: delete after migration
 
 namespace Cacher2;
 require_once $_composer_autoload_path ?? __DIR__ . '/../vendor/autoload.php';

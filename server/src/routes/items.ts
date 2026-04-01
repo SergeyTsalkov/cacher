@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { authMiddleware } from '../auth';
 import { r2ConfigForWorld, r2DeleteObject, itemKeyToObjectKey } from '../r2';
+import { versionCompare, latestVersion } from '../version';
 import type { Env } from '../index';
 import type { AuthContext } from '../auth';
 
@@ -17,36 +18,78 @@ itemsRouter.get('/', authMiddleware(1), async (c) => {
   let stmt: D1PreparedStatement;
   if (match && exact) {
     stmt = c.env.DB.prepare(
-      `SELECT key, MAX(version) as version, created_at FROM items WHERE world = ? AND key = ? GROUP BY key`
+      `SELECT key, version, created_at FROM items WHERE world = ? AND key = ?`
     ).bind(auth.world, match);
   } else if (match) {
     stmt = c.env.DB.prepare(
-      `SELECT key, MAX(version) as version, created_at FROM items WHERE world = ? AND key LIKE ? GROUP BY key ORDER BY key`
+      `SELECT key, version, created_at FROM items WHERE world = ? AND key LIKE ?`
     ).bind(auth.world, match + '%');
   } else {
     stmt = c.env.DB.prepare(
-      `SELECT key, MAX(version) as version, created_at FROM items WHERE world = ? GROUP BY key ORDER BY key`
+      `SELECT key, version, created_at FROM items WHERE world = ?`
     ).bind(auth.world);
   }
 
-  const { results } = await stmt.all();
-  return c.json({ items: results });
+  const { results } = await stmt.all<{ key: string; version: string; created_at: number }>();
+
+  // Group by key and pick the latest version per key using proper version comparison
+  const byKey = new Map<string, { key: string; version: string; created_at: number }>();
+  for (const row of results) {
+    const current = byKey.get(row.key);
+    if (!current || versionCompare(row.version, current.version) > 0) {
+      byKey.set(row.key, row);
+    }
+  }
+
+  const items = [...byKey.values()].sort((a, b) => a.key.localeCompare(b.key));
+  return c.json({ items });
 });
 
-// GET /items/:key — all versions for a key
+// GET /items/:key — all versions for a key, newest first
 itemsRouter.get('/:key', authMiddleware(1), async (c) => {
   const auth = c.get('auth');
   const key = decodeURIComponent(c.req.param('key'));
 
   const { results } = await c.env.DB.prepare(
-    `SELECT version, created_at FROM items WHERE world = ? AND key = ? ORDER BY version DESC`
-  ).bind(auth.world, key).all();
+    `SELECT version, created_at FROM items WHERE world = ? AND key = ?`
+  ).bind(auth.world, key).all<{ version: string; created_at: number }>();
 
   if (results.length === 0) {
     return c.json({ error: 'not found' }, 404);
   }
 
-  return c.json({ key, versions: results });
+  const versions = [...results].sort((a, b) => versionCompare(b.version, a.version));
+  return c.json({ key, versions });
+});
+
+// POST /items/batch — fetch latest version for a specific set of keys (single round-trip)
+itemsRouter.post('/batch', authMiddleware(1), async (c) => {
+  const auth = c.get('auth');
+  const body = await c.req.json<{ keys: string[] }>();
+  const { keys } = body;
+
+  if (!Array.isArray(keys) || keys.length === 0) {
+    return c.json({ items: [] });
+  }
+  if (keys.length > 1000) {
+    return c.json({ error: 'max 1000 keys per batch' }, 400);
+  }
+
+  const placeholders = keys.map(() => '?').join(', ');
+  const { results } = await c.env.DB.prepare(
+    `SELECT key, version, created_at FROM items WHERE world = ? AND key IN (${placeholders})`
+  ).bind(auth.world, ...keys).all<{ key: string; version: string; created_at: number }>();
+
+  // Pick the latest version per key using proper version comparison
+  const byKey = new Map<string, { key: string; version: string; created_at: number }>();
+  for (const row of results) {
+    const current = byKey.get(row.key);
+    if (!current || versionCompare(row.version, current.version) > 0) {
+      byKey.set(row.key, row);
+    }
+  }
+
+  return c.json({ items: [...byKey.values()] });
 });
 
 // DELETE /items/:key/:version

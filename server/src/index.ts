@@ -4,7 +4,7 @@ import { pushRouter } from './routes/push';
 import { pullRouter } from './routes/pull';
 import { cleanRouter } from './routes/clean';
 import { usersRouter } from './routes/users';
-import { adminRouter } from './routes/admin';
+import { adminRouter } from './routes/admin'; // TODO: delete after migration
 import type { AuthContext } from './auth';
 
 export interface Env {
@@ -25,7 +25,7 @@ app.route('/push', pushRouter);
 app.route('/pull', pullRouter);
 app.route('/clean', cleanRouter);
 app.route('/users', usersRouter);
-app.route('/admin', adminRouter);
+app.route('/admin', adminRouter); // TODO: delete after migration
 
 app.notFound(c => c.json({ error: 'not found' }, 404));
 app.onError((err, c) => {

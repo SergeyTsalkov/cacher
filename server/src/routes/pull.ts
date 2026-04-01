@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { authMiddleware } from '../auth';
 import { r2ConfigForWorld, presignedGetUrl, itemKeyToObjectKey } from '../r2';
+import { latestVersion } from '../version';
 import type { Env } from '../index';
 import type { AuthContext } from '../auth';
 
@@ -18,9 +19,11 @@ pullRouter.post('/', authMiddleware(1), async (c) => {
     return c.json({ error: 'key required' }, 400);
   }
 
-  const row = await c.env.DB.prepare(
-    `SELECT version, created_at FROM items WHERE world = ? AND key = ? ORDER BY version DESC LIMIT 1`
-  ).bind(auth.world, key).first<{ version: string; created_at: number }>();
+  const { results } = await c.env.DB.prepare(
+    `SELECT version, created_at FROM items WHERE world = ? AND key = ?`
+  ).bind(auth.world, key).all<{ version: string; created_at: number }>();
+
+  const row = latestVersion(results);
 
   if (!row) {
     return c.json({ error: 'not found' }, 404);

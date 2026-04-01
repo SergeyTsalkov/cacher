@@ -32,12 +32,12 @@ class Cacher {
     $this->installedIndex = new CacherIndex('installed', $local_index_file, $username);
   }
 
-  function localUpToDate(string $key) {
-    $Remote = $this->remoteApi->getIV($key);
+  function localUpToDate(string $key, ?Item $RemoteItem=null) {
+    $RemoteIV = $RemoteItem ? $RemoteItem->get() : $this->remoteApi->getIV($key);
     $Local = $this->localIndex->getIV($key);
 
-    if (!$Local || !$Remote) return false;
-    return $Local->version == $Remote->version;
+    if (!$Local || !$RemoteIV) return false;
+    return $Local->version == $RemoteIV->version;
   }
 
   function push(string $path, string $key, ?string $version=null) {
@@ -293,7 +293,7 @@ class Cacher {
   }
 
   // used by install, upgrade, copy
-  private function _install(string $key, ?string $path=null, bool $copy_only=false, bool $use_symlink=false) {
+  private function _install(string $key, ?string $path=null, bool $copy_only=false, bool $use_symlink=false, ?Item $RemoteItem=null) {
     $InstalledItem = null;
     if (! $copy_only) {
       $InstalledItem = $this->installedIndex->getIV($key);
@@ -309,7 +309,7 @@ class Cacher {
       throw new Exception("Path doesn't look valid: $path");
     }
 
-    if (! $this->localUpToDate($key)) {
+    if (! $this->localUpToDate($key, $RemoteItem)) {
       $this->pull($key);
     }
     $LocalItem = $this->localIndex->getIV($key);
@@ -378,8 +378,7 @@ class Cacher {
       throw new Exception("invalid argument");
     }
 
-    // prefetch all remote info with one batch of requests
-    $this->remoteApi->search($keys);
+    $RemoteItems = $this->remoteApi->search($keys);
 
     foreach ($keys as $key) {
       $Installed = $this->installedIndex->getIV($key);
@@ -387,7 +386,7 @@ class Cacher {
         throw new Exception("Not installed: $key");
       }
 
-      $this->_install($key, null, false, $Installed->is_symlink);
+      $this->_install($key, null, false, $Installed->is_symlink, $RemoteItems->get($key));
     }
   }
 

@@ -10,6 +10,7 @@ class RemoteApiClient {
   function __construct(string $baseUrl, string $apiKey) {
     $this->http = new Client([
       'base_uri' => rtrim($baseUrl, '/') . '/',
+      'connect_timeout' => 5,
       'timeout'  => 30,
       'headers'  => [
         'Authorization' => "Bearer $apiKey",
@@ -26,15 +27,12 @@ class RemoteApiClient {
       $query['match'] = $key;
       if (!$substring) $query['exact'] = '1';
     } else if (is_array($key) && count($key) > 0) {
-      // For array of keys, fetch each one individually
+      $data = $this->post('items/batch', ['keys' => array_values($key)]);
       $ItemSet = new ItemSet();
-      foreach ($key as $k) {
-        $sub = $this->search($k, false);
-        foreach ($sub as $Item) {
-          foreach ($Item as $IV) {
-            $ItemSet->add($Item->key, $IV);
-          }
-        }
+      foreach ($data['items'] as $row) {
+        $IV = new ItemVersion($row['version'], '', (int)$row['created_at']);
+        $IV->key = $row['key'];
+        $ItemSet->add($row['key'], $IV);
       }
       return $ItemSet;
     }
@@ -137,28 +135,40 @@ class RemoteApiClient {
     return $this->get('users')['users'];
   }
 
-  // Used by migration tool only
+  // TODO: delete after migration
   function adminMigrate(string $world, array $items): array {
     return $this->post('admin/migrate', ['world' => $world, 'items' => $items]);
   }
 
+  // TODO: delete after migration
   function adminWorlds(): array {
     return $this->get('admin/worlds');
   }
 
   private function get(string $path, array $query=[]): array {
-    $uri = $path;
-    if ($query) $uri .= '?' . http_build_query($query);
-    $resp = $this->http->get($uri);
-    return json_decode((string)$resp->getBody(), true);
+    return $this->request('GET', $path, ['query' => $query]);
   }
 
   private function post(string $path, array $body): array {
-    $resp = $this->http->post($path, ['json' => $body]);
-    return json_decode((string)$resp->getBody(), true);
+    return $this->request('POST', $path, ['json' => $body]);
   }
 
   private function delete_(string $path): void {
-    $this->http->delete($path);
+    $this->request('DELETE', $path);
+  }
+
+  private function request(string $method, string $uri, array $options=[]): array {
+    $waits = [1, 2, 4];
+    $attempt = 0;
+
+    while (true) {
+      try {
+        $resp = $this->http->request($method, $uri, $options);
+        return json_decode((string)$resp->getBody(), true) ?? [];
+      } catch (\GuzzleHttp\Exception\ConnectException $e) {
+        if ($attempt >= count($waits)) throw $e;
+        sleep($waits[$attempt++]);
+      }
+    }
   }
 }

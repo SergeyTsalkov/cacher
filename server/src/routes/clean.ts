@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { authMiddleware } from '../auth';
 import { r2ConfigForWorld, r2DeleteObject, itemKeyToObjectKey } from '../r2';
+import { versionCompare, sortVersionsDesc } from '../version';
 import type { Env } from '../index';
 import type { AuthContext } from '../auth';
 
@@ -21,21 +22,23 @@ cleanRouter.post('/', authMiddleware(2), async (c) => {
   const now = Math.floor(Date.now() / 1000);
 
   const { results } = await c.env.DB.prepare(
-    `SELECT key, version, created_at FROM items WHERE world = ? ORDER BY key, version DESC`
+    `SELECT key, version, created_at FROM items WHERE world = ?`
   ).bind(auth.world).all<ItemRow>();
 
-  // Group versions by key
+  // Group versions by key, sorted newest-first using proper version comparison
   const byKey = new Map<string, ItemRow[]>();
   for (const row of results) {
     if (!byKey.has(row.key)) byKey.set(row.key, []);
     byKey.get(row.key)!.push(row);
   }
+  for (const [key, versions] of byKey) {
+    byKey.set(key, sortVersionsDesc(versions));
+  }
 
   const toDelete: ItemRow[] = [];
 
   for (const [, versions] of byKey) {
-    // versions are already sorted newest-first (ORDER BY version DESC)
-    // Find the newest "settled" version (age >= 24h)
+    // Find the newest settled version (age >= 24h), iterating newest-first
     let settledVersion: string | null = null;
     for (const v of versions) {
       if (now - v.created_at >= purgeAfter) {
@@ -46,9 +49,9 @@ cleanRouter.post('/', authMiddleware(2), async (c) => {
 
     if (!settledVersion) continue;
 
-    // Mark all versions older than settled as old
+    // Mark all versions older than the settled version for deletion
     for (const v of versions) {
-      if (v.version < settledVersion) {
+      if (versionCompare(v.version, settledVersion) < 0) {
         toDelete.push(v);
       }
     }
