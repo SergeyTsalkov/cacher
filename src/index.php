@@ -177,6 +177,22 @@ class CacherIndex {
     return $old;
   }
 
+  // Returns keys where every version has been untouched for at least $older_than seconds
+  function stale(): array {
+    $older_than = 30 * 24 * 3600; // 30 days
+
+    if (!$this->isLocal()) {
+      throw new Exception("stale() only works on localIndex");
+    }
+
+    $cutoff = time() - $older_than;
+    return $this->db->queryFirstColumn(
+      "SELECT `key` FROM %b GROUP BY `key`
+       HAVING MAX(strftime('%%s', touched_at)) < %i",
+      $this->table, $cutoff
+    );
+  }
+
   function touch(string $key, string $version) {
     if (!$this->isLocal()) {
       throw new Exception("touch() only works on localIndex");

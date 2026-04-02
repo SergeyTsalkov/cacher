@@ -178,6 +178,8 @@ class Cacher {
     // installed items with is_symlink set are "used"
     // meaning we can't remove the localIndex version
     $used = [];
+    // all live installed keys — exempt from stale pruning
+    $installed_keys = [];
 
     // delete installed items that don't exist on disk anymore
     $users = $this->installedIndex->lusers();
@@ -193,11 +195,18 @@ class Cacher {
             continue;
           }
 
+          $installed_keys[$Item->key] = true;
+
           if ($IV->is_symlink) {
             $used[$Item->key][$IV->version] = true;
           }
         }
       }
+    }
+
+    foreach ($this->localIndex->stale() as $key) {
+      if (isset($installed_keys[$key])) continue;
+      $this->deletelocal($key);
     }
 
     foreach ($this->localIndex->old() as [$key, $version]) {
