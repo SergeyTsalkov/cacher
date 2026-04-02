@@ -114,30 +114,24 @@ class Cacher {
     $this->sayf("Pulling %s (%s)...", $key, $version);
     mkdir($local_path, 0755, true);
 
-    $lzfile = $this->path_join($local_path, '_extract.tar.lz4');
+    try {
+      $tmpdir = $this->mktempdir('lz4extract');
+      $lzfile = $this->path_join($tmpdir, '_extract.tar.lz4');
+      $this->httpClient->get($pullInfo['download_url'], ['sink' => $lzfile]);
 
-    $this->httpClient->get($pullInfo['download_url'], ['sink' => $lzfile]);
-
-    $files = $this->list_files($local_path);
-
-    $extract_filename = '_extract.tar.lz4';
-    if (count($files) == 1 && $files[0] == $extract_filename) {
-      try {
-        $tmpdir = $this->mktempdir('lz4extract');
-        $old = $this->path_join($local_path, $extract_filename);
-        $new = $this->path_join($tmpdir, $extract_filename);
-        rename($old, $new);
-
-        // tar files created with -C have a ./ directory with permissions
-        // tar will change the permissions of that directory unless --no-overwrite-dir is used
-        $this->run("lz4 -d $new - | tar -C $local_path --no-same-owner --no-same-permissions --no-overwrite-dir -xf -");
-        $files = $this->list_files($local_path);
-
-      } finally {
-        $this->filesystem()->remove($tmpdir);
+      if (!file_exists($lzfile)) {
+        throw new Exception("Failed to download lz4 file for $key");
       }
-    }
 
+      // tar files created with -C have a ./ directory with permissions
+      // tar will change the permissions of that directory unless --no-overwrite-dir is used
+      $this->run("lz4 -d $lzfile - | tar -C $local_path --no-same-owner --no-same-permissions --no-overwrite-dir -xf -");
+      $files = $this->list_files($local_path);
+
+    } finally {
+      $this->filesystem()->remove($tmpdir);
+    }
+    
     $this->localIndex->add($key, $version, $local_path, $files);
     $this->sayf("Pulled %s (%s) in %s", $key, $version, $StartedAt->shortAbsoluteDiffForHumans(2));
   }
