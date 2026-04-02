@@ -65,7 +65,7 @@ class Cacher {
     try {
       $lzdir = $this->mktempdir('lz4');
       $lzfile = $this->path_join($lzdir, '_extract.tar.lz4');
-      $this->run("tar --numeric-owner -C $path -cf - . | lz4 -q - $lzfile");
+      $this->run("tar --numeric-owner -C " . escapeshellarg($path) . " -cf - . | lz4 -q - $lzfile");
 
       $initResult = $this->remoteApi->pushInit($key, $version);
       $this->httpClient->put($initResult['upload_url'], [
@@ -245,7 +245,7 @@ class Cacher {
     else if (is_string($match)) $match = [$match];
 
     $Local = $this->localIndex->search($match);
-    $Remote = $this->remoteApi->search($Local->keys());
+    $Remote = $Local->count() > 0 ? $this->remoteApi->search($Local->keys()) : new ItemSet();
 
     $results = [];
     foreach ($Local as $LocalItem) {
@@ -595,7 +595,7 @@ class Cacher {
 
   function is_available(string $program): bool {
     try {
-      $this->run('which', [$program], true);
+      $this->run('which', [$program]);
     } catch (Exception $e) {
       return false;
     }

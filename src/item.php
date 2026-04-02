@@ -64,6 +64,7 @@ class Item implements \Iterator {
     if ($this->Versions) {
       return $this->versions()[0];
     }
+    throw new \Exception("Item {$this->key} has no versions");
   }
 
   #[\ReturnTypeWillChange]
