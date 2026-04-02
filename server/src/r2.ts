@@ -12,14 +12,14 @@ export function itemKeyToObjectKey(itemKey: string, version: string): string {
 }
 
 export function r2ConfigForWorld(env: Env, world: string): R2Config {
-  const worlds = JSON.parse(env.CACHER2_WORLDS) as Record<string, string>;
+  const worlds = JSON.parse(env.WORLDS) as Record<string, string>;
   const bucket = worlds[world];
   if (!bucket) throw new Error(`Unknown world: ${world}`);
   return {
-    accountId: env.CACHER2_R2_ACCOUNT_ID,
+    accountId: env.R2_ACCOUNT_ID,
     bucket,
-    accessKeyId: env.CACHER2_R2_ACCESS_KEY_ID,
-    secretAccessKey: env.CACHER2_R2_SECRET_ACCESS_KEY,
+    accessKeyId: env.R2_ACCESS_KEY_ID,
+    secretAccessKey: env.R2_SECRET_ACCESS_KEY,
   };
 }
 

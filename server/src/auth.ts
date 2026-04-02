@@ -22,13 +22,13 @@ export function generateApiKey(level: 1 | 2 | 3): string {
 }
 
 export function getWorlds(env: Env): Record<string, string> {
-  return JSON.parse(env.CACHER2_WORLDS) as Record<string, string>;
+  return JSON.parse(env.WORLDS) as Record<string, string>;
 }
 
 export function getDefaultWorld(env: Env): string {
   const worlds = getWorlds(env);
   const first = Object.keys(worlds)[0];
-  if (!first) throw new Error('No worlds configured in CACHER2_WORLDS');
+  if (!first) throw new Error('No worlds configured in WORLDS');
   return first;
 }
 
@@ -46,7 +46,7 @@ export const authMiddleware = (minLevel: number) =>
     const worlds = getWorlds(c.env);
 
     if (parsed.level === 4) {
-      if (key !== c.env.CACHER2_ROOT_API_KEY) {
+      if (key !== c.env.ROOT_API_KEY) {
         return c.json({ error: 'unauthorized' }, 401);
       }
       const defaultWorld = Object.keys(worlds)[0];

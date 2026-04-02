@@ -61,18 +61,18 @@ database_id = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"   # <-- paste here
 
 ## Step 5 — Configure worlds
 
-Edit the `CACHER2_WORLDS` var in `wrangler.toml`. The value is a JSON object mapping world names to R2 bucket names. The first key is the default world.
+Edit the `WORLDS` var in `wrangler.toml`. The value is a JSON object mapping world names to R2 bucket names. The first key is the default world.
 
 ```toml
 [vars]
-CACHER2_WORLDS = '{"main": "cacher2-main"}'
+WORLDS = '{"main": "cacher2-main"}'
 ```
 
 For multiple worlds:
 
 ```toml
 [vars]
-CACHER2_WORLDS = '{"main": "cacher2-main", "staging": "cacher2-staging"}'
+WORLDS = '{"main": "cacher2-main", "staging": "cacher2-staging"}'
 ```
 
 World names must match `[a-zA-Z0-9]{2,14}`.
@@ -97,10 +97,10 @@ Save the values shown:
 Set each secret using wrangler. You will be prompted to paste the value:
 
 ```bash
-npx wrangler secret put CACHER2_ROOT_API_KEY
-npx wrangler secret put CACHER2_R2_ACCOUNT_ID
-npx wrangler secret put CACHER2_R2_ACCESS_KEY_ID
-npx wrangler secret put CACHER2_R2_SECRET_ACCESS_KEY
+npx wrangler secret put ROOT_API_KEY
+npx wrangler secret put R2_ACCOUNT_ID
+npx wrangler secret put R2_ACCESS_KEY_ID
+npx wrangler secret put R2_SECRET_ACCESS_KEY
 ```
 
 ### Generating the root API key
@@ -113,11 +113,11 @@ Generate one manually using this format: a `4-` prefix followed by exactly 12 ra
 echo "4-$(LC_ALL=C tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 12)"
 ```
 
-Enter the output as the value for `CACHER2_ROOT_API_KEY`. Keep a copy somewhere safe — it cannot be retrieved after this point. If lost, generate a new one and re-run `wrangler secret put CACHER2_ROOT_API_KEY`.
+Enter the output as the value for `ROOT_API_KEY`. Keep a copy somewhere safe — it cannot be retrieved after this point. If lost, generate a new one and re-run `wrangler secret put ROOT_API_KEY`.
 
-**For `CACHER2_R2_ACCOUNT_ID`:** enter your Cloudflare Account ID (32-character hex string visible in the dashboard URL or the R2 overview page).
+**For `R2_ACCOUNT_ID`:** enter your Cloudflare Account ID (32-character hex string visible in the dashboard URL or the R2 overview page).
 
-**For `CACHER2_R2_ACCESS_KEY_ID` and `CACHER2_R2_SECRET_ACCESS_KEY`:** enter the values from Step 6.
+**For `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY`:** enter the values from Step 6.
 
 ## Step 8 — Apply the database schema
 
@@ -230,10 +230,10 @@ npm run dev
 The local server runs at `http://localhost:8787`. Secrets defined in `.dev.vars` (a file at `server/.dev.vars`, gitignored) are used in local mode:
 
 ```ini
-CACHER2_ROOT_API_KEY=4-YourLocalRootKey
-CACHER2_R2_ACCOUNT_ID=your-account-id
-CACHER2_R2_ACCESS_KEY_ID=your-access-key-id
-CACHER2_R2_SECRET_ACCESS_KEY=your-secret-access-key
+ROOT_API_KEY=4-YourLocalRootKey
+R2_ACCOUNT_ID=your-account-id
+R2_ACCESS_KEY_ID=your-access-key-id
+R2_SECRET_ACCESS_KEY=your-secret-access-key
 ```
 
 Note: in local dev mode, R2 presigned URLs still point at the real R2 endpoint, so R2 credentials must be real even for local testing.

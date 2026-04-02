@@ -9,11 +9,11 @@ import type { AuthContext } from './auth';
 
 export interface Env {
   DB: D1Database;
-  CACHER2_ROOT_API_KEY: string;
-  CACHER2_R2_ACCOUNT_ID: string;
-  CACHER2_R2_ACCESS_KEY_ID: string;
-  CACHER2_R2_SECRET_ACCESS_KEY: string;
-  CACHER2_WORLDS: string; // JSON: {"worldName": "bucketName"}
+  ROOT_API_KEY: string;
+  R2_ACCOUNT_ID: string;
+  R2_ACCESS_KEY_ID: string;
+  R2_SECRET_ACCESS_KEY: string;
+  WORLDS: string; // JSON: {"worldName": "bucketName"}
 }
 
 type Variables = { auth: AuthContext };
