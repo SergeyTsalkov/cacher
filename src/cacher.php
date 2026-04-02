@@ -225,9 +225,12 @@ class Cacher {
     } while ($result['more']);
   }
 
-  function remoteinfo(?string $match=null, bool $exact = false): array {
+  function remoteinfo(string|array|null $match=null): array {
+    if (is_null($match)) $match = [];
+    else if (is_string($match)) $match = [$match];
+
     $results = [];
-    $ItemSet = $this->remoteApi->search($match, !$exact);
+    $ItemSet = $this->remoteApi->search($match);
     foreach ($ItemSet as $Item) {
       $results[$Item->key] = [
         'version' => $Item->version(),
@@ -237,9 +240,12 @@ class Cacher {
     return $results;
   }
 
-  function localinfo(?string $match=null, bool $exact = false): array {
-    $Local = $this->localIndex->search($match, !$exact);
-    $Remote = $this->remoteApi->fetchKeys($Local->keys());
+  function localinfo(string|array|null $match=null): array {
+    if (is_null($match)) $match = [];
+    else if (is_string($match)) $match = [$match];
+
+    $Local = $this->localIndex->search($match);
+    $Remote = $this->remoteApi->search($Local->keys());
 
     $results = [];
     foreach ($Local as $LocalItem) {
@@ -263,7 +269,7 @@ class Cacher {
     $this->requireUsername();
     $Installed = $this->installedIndex->search();
     $Local = $this->localIndex->search($Installed->keys());
-    $Remote = $this->remoteApi->fetchKeys($Installed->keys());
+    $Remote = $this->remoteApi->search($Installed->keys());
 
     $results = [];
     foreach ($Installed as $Item) {
@@ -372,7 +378,7 @@ class Cacher {
 
     $keys ??= $this->installedIndex->search()->keys();
 
-    $RemoteItems = $this->remoteApi->fetchKeys($keys);
+    $RemoteItems = $this->remoteApi->search($keys);
 
     foreach ($keys as $key) {
       $Installed = $this->installedIndex->getIV($key);

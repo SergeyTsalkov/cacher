@@ -78,39 +78,32 @@ class CacherIndex {
     }
   }
 
-  function get(string $key): ?Item {
-    $ItemSet = $this->search($key);
-    return $ItemSet->get($key);
-  }
-
   function getIV(string $key, ?string $version=null): ?ItemVersion {
-    $Item = $this->get($key);
+    $Item = $this->search([$key])->get($key);
     if ($Item) return $Item->get($version);
     return null;
   }
 
-  function search($key=null, bool $substring=false): ItemSet {
-    $ItemSet = new ItemSet();
-
+  function search(array $keys=[]): ItemSet {
     $Where = new \WhereClause('and');
     if ($this->isInstalled()) $Where->add('username=%s', $this->username);
 
-    if (is_string($key)) {
-      if (strlen($key) == 0) return $ItemSet;
-      if ($substring) $Where->add('`key` LIKE %s', $key . '%');
-      else $Where->add('`key`=%s', $key);
-    }
-    else if (is_array($key)) {
-      if (count($key) == 0) return $ItemSet;
-      $Where->add('`key` IN %ls', $key);
-    }
-    else if (!is_null($key)) {
-      throw new Exception("key must be string, array, or null");
+    $ItemSet = new ItemSet();
+    $keys = array_values(array_filter($keys, fn($k) => $k !== ''));
+    $exactKeys    = array_values(array_filter($keys, fn($k) => !str_contains($k, '*')));
+    $wildcardKeys = array_values(array_filter($keys, fn($k) =>  str_contains($k, '*')));
+
+    $OrWhere = new \WhereClause('or');
+    if ($exactKeys) $OrWhere->add('`key` IN %ls', $exactKeys);
+    foreach ($wildcardKeys as $pattern) {
+      $OrWhere->add('`key` LIKE %s', str_replace('*', '%', $pattern));
     }
 
-    $ts_block = "strftime('%s', created_at) as created_at_ts";
-
-    $results = $this->db->query("SELECT *,%l FROM %b WHERE %l", $ts_block, $this->table, $Where);
+    if (count($OrWhere)) {
+      $Where->add('%?', $OrWhere);
+    }
+    
+    $results = $this->db->query("SELECT *, strftime('%%s', created_at) as created_at_ts FROM %b WHERE %l", $this->table, $Where);
     foreach ($results as $result) {
       $IV = new ItemVersion($result['version'], $result['path'], $result['created_at_ts']);
       if (isset($result['is_symlink'])) $IV->is_symlink = !!$result['is_symlink'];
@@ -125,7 +118,7 @@ class CacherIndex {
   }
 
   function versions(string $key): array {
-    $Item = $this->get($key);
+    $Item = $this->search([$key])->get($key);
     if (! $Item) return [];
     return $Item->versions();
   }

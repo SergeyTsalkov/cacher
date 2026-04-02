@@ -20,25 +20,13 @@ class RemoteApiClient {
     ]);
   }
 
-  // List remote items, optionally filtered by prefix or exact key match
-  function search(?string $match=null, bool $substring=false): ItemSet {
-    $query = [];
-    if ($match !== null && $match !== '') {
-      $query['match'] = $match;
-      if (!$substring) $query['exact'] = '1';
-    }
-
-    $data = $this->get('items', $query);
-    return $this->itemSetFromRows($data['items']);
-  }
-
-  // Fetch the latest version for a specific set of keys, in one or more batch requests
-  function fetchKeys(array $keys): ItemSet {
-    if (empty($keys)) return new ItemSet();
-
+  // Query remote items by key. Keys may contain * as a wildcard; keys without * are exact.
+  // An empty array returns all items. Chunked automatically if over 1000.
+  function search(array $keys): ItemSet {
     $ItemSet = new ItemSet();
-    foreach (array_chunk(array_values($keys), 1000) as $chunk) {
-      $data = $this->post('items/batch', ['keys' => $chunk]);
+    $chunks = $keys ? array_chunk(array_values($keys), 1000) : [[]];
+    foreach ($chunks as $chunk) {
+      $data = $this->post('items/query', ['keys' => $chunk]);
       foreach ($this->itemSetFromRows($data['items']) as $Item) {
         foreach ($Item as $IV) {
           $ItemSet->add($Item->key, $IV);

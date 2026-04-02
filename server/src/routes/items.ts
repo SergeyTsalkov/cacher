@@ -9,32 +9,46 @@ type Variables = { auth: AuthContext };
 
 export const itemsRouter = new Hono<{ Bindings: Env; Variables: Variables }>();
 
-// GET /items — list latest version per key
-itemsRouter.get('/', authMiddleware(1), async (c) => {
+// POST /items/query — fetch latest version for a set of keys (exact or wildcard with *)
+itemsRouter.post('/query', authMiddleware(1), async (c) => {
   const auth = c.get('auth');
-  const match = c.req.query('match');
-  const exact = c.req.query('exact') === '1';
+  const body = await c.req.json<{ keys: string[] }>();
+  const { keys } = body;
 
-  let stmt: D1PreparedStatement;
-  if (match && exact) {
-    stmt = c.env.DB.prepare(
-      `SELECT key, version, created_at FROM items WHERE world = ? AND key = ?`
-    ).bind(auth.world, match);
-  } else if (match) {
-    stmt = c.env.DB.prepare(
-      `SELECT key, version, created_at FROM items WHERE world = ? AND key LIKE ?`
-    ).bind(auth.world, match + '%');
-  } else {
-    stmt = c.env.DB.prepare(
-      `SELECT key, version, created_at FROM items WHERE world = ?`
-    ).bind(auth.world);
+  if (!Array.isArray(keys)) {
+    return c.json({ items: [] });
+  }
+  if (keys.length > 1000) {
+    return c.json({ error: 'max 1000 keys per request' }, 400);
   }
 
-  const { results } = await stmt.all<{ key: string; version: string; created_at: number }>();
+  const filtered = keys.filter(k => k !== '');
+  const exactKeys = filtered.filter(k => !k.includes('*'));
+  const likePatterns = filtered.filter(k => k.includes('*')).map(k => k.replace(/\*/g, '%'));
 
-  // Group by key and pick the latest version per key using proper version comparison
-  const byKey = new Map<string, { key: string; version: string; created_at: number }>();
-  for (const row of results) {
+  type ItemRow = { key: string; version: string; created_at: number };
+
+  let sql = `SELECT key, version, created_at FROM items WHERE world = ?`;
+  const bindings: unknown[] = [auth.world];
+
+  if (filtered.length > 0) {
+    const conditions: string[] = [];
+    if (exactKeys.length > 0) {
+      conditions.push(`key IN (${exactKeys.map(() => '?').join(', ')})`);
+      bindings.push(...exactKeys);
+    }
+    for (const pattern of likePatterns) {
+      conditions.push('key LIKE ?');
+      bindings.push(pattern);
+    }
+    sql += ` AND (${conditions.join(' OR ')})`;
+  }
+
+  const { results: rows } = await c.env.DB.prepare(sql).bind(...bindings).all<ItemRow>();
+
+  // Pick the latest version per key using proper version comparison
+  const byKey = new Map<string, ItemRow>();
+  for (const row of rows) {
     const current = byKey.get(row.key);
     if (!current || versionCompare(row.version, current.version) > 0) {
       byKey.set(row.key, row);
@@ -60,36 +74,6 @@ itemsRouter.get('/:key', authMiddleware(1), async (c) => {
 
   const versions = [...results].sort((a, b) => versionCompare(b.version, a.version));
   return c.json({ key, versions });
-});
-
-// POST /items/batch — fetch latest version for a specific set of keys (single round-trip)
-itemsRouter.post('/batch', authMiddleware(1), async (c) => {
-  const auth = c.get('auth');
-  const body = await c.req.json<{ keys: string[] }>();
-  const { keys } = body;
-
-  if (!Array.isArray(keys) || keys.length === 0) {
-    return c.json({ items: [] });
-  }
-  if (keys.length > 1000) {
-    return c.json({ error: 'max 1000 keys per batch' }, 400);
-  }
-
-  const placeholders = keys.map(() => '?').join(', ');
-  const { results } = await c.env.DB.prepare(
-    `SELECT key, version, created_at FROM items WHERE world = ? AND key IN (${placeholders})`
-  ).bind(auth.world, ...keys).all<{ key: string; version: string; created_at: number }>();
-
-  // Pick the latest version per key using proper version comparison
-  const byKey = new Map<string, { key: string; version: string; created_at: number }>();
-  for (const row of results) {
-    const current = byKey.get(row.key);
-    if (!current || versionCompare(row.version, current.version) > 0) {
-      byKey.set(row.key, row);
-    }
-  }
-
-  return c.json({ items: [...byKey.values()] });
 });
 
 // DELETE /items/:key/:version
