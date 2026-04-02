@@ -15,6 +15,8 @@ interface ItemRow {
   created_at: number;
 }
 
+const CLEAN_BATCH_SIZE = 10;
+
 // POST /clean — purge old settled versions
 cleanRouter.post('/', authMiddleware(2), async (c) => {
   const auth = c.get('auth');
@@ -57,10 +59,13 @@ cleanRouter.post('/', authMiddleware(2), async (c) => {
     }
   }
 
+  const more = toDelete.length > CLEAN_BATCH_SIZE;
+  const batch = toDelete.slice(0, CLEAN_BATCH_SIZE);
+
   const r2cfg = r2ConfigForWorld(c.env, auth.world);
   const deleted: string[] = [];
 
-  for (const item of toDelete) {
+  for (const item of batch) {
     const objectKey = itemKeyToObjectKey(item.key, item.version);
     await r2DeleteObject(r2cfg, objectKey);
     await c.env.DB.prepare(
@@ -69,5 +74,5 @@ cleanRouter.post('/', authMiddleware(2), async (c) => {
     deleted.push(`${item.key}@${item.version}`);
   }
 
-  return c.json({ deleted });
+  return c.json({ deleted, more });
 });

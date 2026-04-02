@@ -116,9 +116,13 @@ class RemoteApiClient {
     }
   }
 
+  // Returns ['deleted' => string[], 'more' => bool]
   function cleanRemote(): array {
     $data = $this->post('clean', []);
-    return $data['deleted'] ?? [];
+    return [
+      'deleted' => $data['deleted'] ?? [],
+      'more'    => $data['more'] ?? false,
+    ];
   }
 
   function addUser(string $name, int $level, ?string $world=null): string {

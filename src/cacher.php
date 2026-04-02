@@ -214,10 +214,12 @@ class Cacher {
 
   function cleanremote() {
     $this->say("Cleaning remote cache..");
-    $deleted = $this->remoteApi->cleanRemote();
-    foreach ($deleted as $item) {
-      $this->say("Deleted $item from remote cache");
-    }
+    do {
+      $result = $this->remoteApi->cleanRemote();
+      foreach ($result['deleted'] as $item) {
+        $this->say("Deleted $item from remote cache");
+      }
+    } while ($result['more']);
   }
 
   function remoteinfo(?string $match=null, bool $exact = false): array {
