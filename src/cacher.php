@@ -544,6 +544,12 @@ class Cacher {
   function sudo(string $username, string $command, array $args=[]) {
     $full_command = implode(' ', [$command, ...array_map('escapeshellarg', $args)]);
 
+    $current_user = posix_getpwuid(posix_geteuid())['name'] ?? null;
+    if ($current_user === $username) {
+      $this->sayf_debug('[sudo-self %s]: %s', $username, $full_command);
+      return $this->run($full_command);
+    }
+
     if (!defined('CACHER_IS_DEVELOPMENT')) {
       if (posix_geteuid() != 0) {
         throw new Exception("Unable to sudo to $username: we are not root");
