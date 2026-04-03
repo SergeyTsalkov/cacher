@@ -1,0 +1,28 @@
+# cacher2 server configuration
+# Copy to config.toml and fill in your values.
+# Keep config.toml out of version control — it contains secrets.
+#
+# Run with: c2server config.toml [--debug]
+# Initialize a new database: c2server config.toml --newdb
+
+port = 3000
+db_path = "/var/lib/cacher/cacher.db"
+root_api_key = "4-xxxxxxxxxxxx"
+
+# R2 bucket for DB backups — omit or comment out to disable backups
+# backup_bucket = "cacher-backups"
+
+# TLS — omit to serve plain HTTP (e.g. when terminating TLS at a reverse proxy)
+# [tls]
+# cert = "/etc/ssl/certs/cacher.crt"
+# key  = "/etc/ssl/private/cacher.key"
+
+[r2]
+account_id = ""
+access_key_id = ""
+secret_access_key = ""
+
+# Each entry maps a world name to an R2 bucket name.
+# The first world alphabetically is the default for root-level operations.
+[worlds]
+main = "cacher2-main"

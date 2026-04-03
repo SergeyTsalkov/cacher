@@ -8,5 +8,8 @@ CLAUDE.md
 
 # Server
 /server/node_modules/
-/server/config.toml
 /server/cacher.db*
+
+# goserver
+config.toml
+/goserver/goserver
