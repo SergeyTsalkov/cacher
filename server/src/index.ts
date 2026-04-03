@@ -2,10 +2,13 @@ import { Hono } from 'hono';
 import { itemsRouter } from './routes/items';
 import { pushRouter } from './routes/push';
 import { pullRouter } from './routes/pull';
-import { cleanRouter } from './routes/clean';
 import { usersRouter } from './routes/users';
 import { adminRouter } from './routes/admin'; // TODO: delete after migration
+import { getWorlds } from './auth';
 import type { AuthContext } from './auth';
+import type { Workflow } from 'cloudflare:workers';
+
+export { CleanupWorkflow } from './cleanup';
 
 export interface Env {
   DB: D1Database;
@@ -14,6 +17,7 @@ export interface Env {
   R2_ACCESS_KEY_ID: string;
   R2_SECRET_ACCESS_KEY: string;
   WORLDS: string; // JSON: {"worldName": "bucketName"}
+  CLEANUP_WORKFLOW: Workflow;
 }
 
 type Variables = { auth: AuthContext };
@@ -23,7 +27,6 @@ const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 app.route('/items', itemsRouter);
 app.route('/push', pushRouter);
 app.route('/pull', pullRouter);
-app.route('/clean', cleanRouter);
 app.route('/users', usersRouter);
 app.route('/admin', adminRouter); // TODO: delete after migration
 
@@ -33,4 +36,11 @@ app.onError((err, c) => {
   return c.json({ error: 'internal server error' }, 500);
 });
 
-export default app;
+async function scheduled(_event: ScheduledEvent, env: Env, _ctx: ExecutionContext) {
+  const worlds = getWorlds(env);
+  for (const world of Object.keys(worlds)) {
+    await env.CLEANUP_WORKFLOW.create({ params: { world } });
+  }
+}
+
+export default { fetch: app.fetch.bind(app), scheduled };

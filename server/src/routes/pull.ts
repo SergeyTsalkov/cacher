@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { authMiddleware } from '../auth';
-import { r2ConfigForWorld, presignedGetUrl, itemKeyToObjectKey } from '../r2';
+import { r2ConfigForWorld, presignedGetUrl, r2HeadObject, itemKeyToObjectKey } from '../r2';
 import { latestVersion } from '../version';
 import type { Env } from '../index';
 import type { AuthContext } from '../auth';
@@ -31,6 +31,16 @@ pullRouter.post('/', authMiddleware(1), async (c) => {
 
   const objectKey = itemKeyToObjectKey(key, row.version);
   const r2cfg = r2ConfigForWorld(c.env, auth.world);
+
+  // Reactively fix DB→R2 orphans: if the object is missing from R2, clean up the DB record.
+  const exists = await r2HeadObject(r2cfg, objectKey);
+  if (!exists) {
+    await c.env.DB.prepare(
+      `DELETE FROM items WHERE world = ? AND key = ? AND version = ?`
+    ).bind(auth.world, key, row.version).run();
+    return c.json({ error: 'not found' }, 404);
+  }
+
   const downloadUrl = await presignedGetUrl(r2cfg, objectKey);
 
   return c.json({

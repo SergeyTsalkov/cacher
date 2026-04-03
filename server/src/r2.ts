@@ -1,139 +1,66 @@
+import { S3Client, PutObjectCommand, GetObjectCommand, HeadObjectCommand, DeleteObjectCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import type { Env } from './index';
 
 export interface R2Config {
-  accountId: string;
+  client: S3Client;
   bucket: string;
-  accessKeyId: string;
-  secretAccessKey: string;
 }
 
 export function itemKeyToObjectKey(itemKey: string, version: string): string {
   return `${itemKey.replace(/:/g, '/')}/${version}/_extract.tar.lz4`;
 }
 
+// Parses foo/bar/1700000000/_extract.tar.lz4 → { key: 'foo:bar', version: '1700000000' }
+export function objectKeyToItemKey(objectKey: string): { key: string; version: string } | null {
+  const m = objectKey.match(/^(.+)\/([^/]+)\/_extract\.tar\.lz4$/);
+  if (!m) return null;
+  return { key: m[1].replace(/\//g, ':'), version: m[2] };
+}
+
 export function r2ConfigForWorld(env: Env, world: string): R2Config {
   const worlds = JSON.parse(env.WORLDS) as Record<string, string>;
   const bucket = worlds[world];
   if (!bucket) throw new Error(`Unknown world: ${world}`);
-  return {
-    accountId: env.R2_ACCOUNT_ID,
-    bucket,
-    accessKeyId: env.R2_ACCESS_KEY_ID,
-    secretAccessKey: env.R2_SECRET_ACCESS_KEY,
-  };
+  const client = new S3Client({
+    region: 'auto',
+    endpoint: `https://${env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+    credentials: {
+      accessKeyId: env.R2_ACCESS_KEY_ID,
+      secretAccessKey: env.R2_SECRET_ACCESS_KEY,
+    },
+  });
+  return { client, bucket };
 }
 
 export async function presignedPutUrl(cfg: R2Config, objectKey: string, expiresInSeconds = 900): Promise<string> {
-  return buildPresignedUrl(cfg, 'PUT', objectKey, expiresInSeconds);
+  return getSignedUrl(cfg.client, new PutObjectCommand({ Bucket: cfg.bucket, Key: objectKey }), { expiresIn: expiresInSeconds });
 }
 
 export async function presignedGetUrl(cfg: R2Config, objectKey: string, expiresInSeconds = 3600): Promise<string> {
-  return buildPresignedUrl(cfg, 'GET', objectKey, expiresInSeconds);
+  return getSignedUrl(cfg.client, new GetObjectCommand({ Bucket: cfg.bucket, Key: objectKey }), { expiresIn: expiresInSeconds });
 }
 
 export async function r2HeadObject(cfg: R2Config, objectKey: string): Promise<boolean> {
-  const url = await buildPresignedUrl(cfg, 'HEAD', objectKey, 60);
-  const resp = await fetch(url, { method: 'HEAD' });
-  return resp.status === 200;
+  try {
+    await cfg.client.send(new HeadObjectCommand({ Bucket: cfg.bucket, Key: objectKey }));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export async function r2DeleteObject(cfg: R2Config, objectKey: string): Promise<void> {
-  const url = await buildPresignedUrl(cfg, 'DELETE', objectKey, 60);
-  await fetch(url, { method: 'DELETE' });
+  await cfg.client.send(new DeleteObjectCommand({ Bucket: cfg.bucket, Key: objectKey }));
 }
 
-async function buildPresignedUrl(
-  cfg: R2Config,
-  method: 'GET' | 'PUT' | 'DELETE' | 'HEAD',
-  objectKey: string,
-  expiresInSeconds: number
-): Promise<string> {
-  const host = `${cfg.accountId}.r2.cloudflarestorage.com`;
-  const region = 'auto';
-  const service = 's3';
-  const now = new Date();
-  const dateStamp = now.toISOString().slice(0, 10).replace(/-/g, '');
-  const amzDate = now.toISOString().replace(/[:\-]/g, '').slice(0, 15) + 'Z';
-
-  const credentialScope = `${dateStamp}/${region}/${service}/aws4_request`;
-  const credential = `${cfg.accessKeyId}/${credentialScope}`;
-
-  const params = new URLSearchParams({
-    'X-Amz-Algorithm': 'AWS4-HMAC-SHA256',
-    'X-Amz-Credential': credential,
-    'X-Amz-Date': amzDate,
-    'X-Amz-Expires': String(expiresInSeconds),
-    'X-Amz-SignedHeaders': 'host',
-  });
-
-  const canonicalUri = `/${cfg.bucket}/${objectKey}`;
-  const canonicalQueryString = [...params.entries()]
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
-    .join('&');
-  const canonicalHeaders = `host:${host}\n`;
-  const signedHeaders = 'host';
-
-  const canonicalRequest = [
-    method,
-    canonicalUri,
-    canonicalQueryString,
-    canonicalHeaders,
-    signedHeaders,
-    'UNSIGNED-PAYLOAD',
-  ].join('\n');
-
-  const hashedCanonicalRequest = await sha256hex(canonicalRequest);
-
-  const stringToSign = [
-    'AWS4-HMAC-SHA256',
-    amzDate,
-    credentialScope,
-    hashedCanonicalRequest,
-  ].join('\n');
-
-  const signingKey = await deriveSigningKey(cfg.secretAccessKey, dateStamp, region, service);
-  const signature = await hmacHex(signingKey, stringToSign);
-
-  params.append('X-Amz-Signature', signature);
-
-  // Sort params for canonical query string — rebuild after signature
-  const finalParams = new URLSearchParams([
-    ...[...params.entries()].sort(([a], [b]) => a.localeCompare(b)),
-  ]);
-
-  return `https://${host}${canonicalUri}?${finalParams.toString()}`;
-}
-
-async function sha256hex(message: string): Promise<string> {
-  const data = new TextEncoder().encode(message);
-  const hash = await crypto.subtle.digest('SHA-256', data);
-  return hexEncode(new Uint8Array(hash));
-}
-
-async function hmacHex(key: ArrayBuffer, message: string): Promise<string> {
-  const cryptoKey = await crypto.subtle.importKey(
-    'raw', key, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']
-  );
-  const sig = await crypto.subtle.sign('HMAC', cryptoKey, new TextEncoder().encode(message));
-  return hexEncode(new Uint8Array(sig));
-}
-
-async function hmacBytes(key: ArrayBuffer | string, message: string): Promise<ArrayBuffer> {
-  const rawKey = typeof key === 'string' ? new TextEncoder().encode(key) : key;
-  const cryptoKey = await crypto.subtle.importKey(
-    'raw', rawKey, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']
-  );
-  return crypto.subtle.sign('HMAC', cryptoKey, new TextEncoder().encode(message));
-}
-
-async function deriveSigningKey(secretKey: string, dateStamp: string, region: string, service: string): Promise<ArrayBuffer> {
-  const kDate = await hmacBytes('AWS4' + secretKey, dateStamp);
-  const kRegion = await hmacBytes(kDate, region);
-  const kService = await hmacBytes(kRegion, service);
-  return hmacBytes(kService, 'aws4_request');
-}
-
-function hexEncode(bytes: Uint8Array): string {
-  return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+// Lists up to 200 objects per page to stay within D1's parameter limit during orphan checks.
+export async function r2ListObjects(cfg: R2Config, continuationToken?: string): Promise<{ keys: string[]; nextToken?: string }> {
+  const resp = await cfg.client.send(new ListObjectsV2Command({
+    Bucket: cfg.bucket,
+    MaxKeys: 200,
+    ContinuationToken: continuationToken,
+  }));
+  const keys = (resp.Contents ?? []).map(obj => obj.Key!).filter(Boolean);
+  return { keys, nextToken: resp.NextContinuationToken };
 }

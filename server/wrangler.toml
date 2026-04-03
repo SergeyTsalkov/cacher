@@ -1,6 +1,7 @@
 name = "cacher2"
 main = "src/index.ts"
 compatibility_date = "2025-01-01"
+compatibility_flags = ["nodejs_compat"]
 
 [[d1_databases]]
 binding = "DB"
@@ -16,8 +17,16 @@ WORLDS = '{"dev":"cacher2-dev"}'
 # R2_ACCESS_KEY_ID
 # R2_SECRET_ACCESS_KEY
 
+[triggers]
+crons = ["0 * * * *"]
+
+[[workflows]]
+name = "cleanup-workflow"
+binding = "CLEANUP_WORKFLOW"
+class_name = "CleanupWorkflow"
+
 [observability]
-enabled = false
+enabled = true
 head_sampling_rate = 1
 
 [observability.logs]

@@ -146,11 +146,6 @@ function cleanlocal(ParsedCommandLine $Cmd) {
   $Cacher->cleanlocal();
 }
 
-function cleanremote(ParsedCommandLine $Cmd) {
-  $Cacher = new Cacher();
-  $Cacher->cleanremote();
-}
-
 function adduser(ParsedCommandLine $Cmd) {
   list($name, $level, $world) = $Cmd->args(1, 3);
   require_args($name, $level);
@@ -207,7 +202,6 @@ function help() {
   echo "  installed [--json] <username> -- list installed items\n\n";
 
   echo "  cleanlocal -- delete old local items\n";
-  echo "  cleanremote -- delete old remote items\n";
   echo "  deletelocal <key> [version] - delete item from local cache\n";
   echo "  deleteremote <key> [version] - delete item from remote cache\n\n";
 
