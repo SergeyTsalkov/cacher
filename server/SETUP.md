@@ -192,6 +192,36 @@ Backups accumulate — set up an R2 lifecycle rule on the backup bucket to expir
 
 To restore: download any `.db` file from the backup bucket and place it at `db_path` (stop the server first).
 
+## Migrating from the previous MySQL-backed server
+
+If you have an existing installation with items in a MySQL remote index, migrate the index directly into SQLite before starting the new server. **The new server's hourly cleanup job scans R2 and removes any objects not found in its database — if the database is empty when it first starts, it will delete everything in R2.** Populating SQLite first prevents this.
+
+The migration script reads MySQL using the same `CACHER_DB_DSN`, `CACHER_DB_USER`, and `CACHER_DB_PASS` constants from your `.dev` file, and writes directly to the SQLite file. It is idempotent — safe to run multiple times.
+
+```bash
+# Dry run first — counts rows without writing anything
+php bin/migrate-to-sqlite.php \
+  --sqlite=/var/lib/cacher/cacher.db \
+  --world=main \
+  --dry-run
+
+# Run the migration (can take a few seconds for large indexes)
+php bin/migrate-to-sqlite.php \
+  --sqlite=/var/lib/cacher/cacher.db \
+  --world=main
+```
+
+**Recommended cutover sequence:**
+
+1. Run the migration while the old server is still live — this gets the bulk of the data
+2. Put the old server into maintenance mode (or accept a brief window of push failures)
+3. Run the migration one more time to catch anything pushed since step 1
+4. Start the new server (`npm start`) — by the time cleanup fires at T+5s, the DB already reflects R2
+5. Update `CACHER2_API_URL` on all clients to point at the new server
+6. Verify with a `remote` listing and a test pull, then decommission the old server
+
+The R2 bucket itself does not need to change — only the index is migrated.
+
 ## Local development
 
 ```bash

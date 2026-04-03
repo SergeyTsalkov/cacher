@@ -135,16 +135,6 @@ class RemoteApiClient {
     return $this->get('users')['users'];
   }
 
-  // TODO: delete after migration
-  function adminMigrate(string $world, array $items): array {
-    return $this->post('admin/migrate', ['world' => $world, 'items' => $items]);
-  }
-
-  // TODO: delete after migration
-  function adminWorlds(): array {
-    return $this->get('admin/worlds');
-  }
-
   private function get(string $path, array $query=[]): array {
     return $this->request('GET', $path, ['query' => $query]);
   }
