@@ -1,13 +1,12 @@
 # cacher2 Server Setup
 
-This document covers setting up the cacher2 server component from scratch on a new Cloudflare account. The server is a Cloudflare Workers application backed by D1 (SQLite) for the item index and Cloudflare R2 for compressed package storage.
+This document covers setting up the cacher2 server from scratch. The server is a Node.js HTTP application backed by a local SQLite database and Cloudflare R2 for compressed package storage.
 
 ## Prerequisites
 
-- A Cloudflare account
-- Node.js 18+ installed locally
-- `npm` or `npx` available
-- The cacher2 PHP client installed on any machines that will push/pull packages
+- Node.js 24+ on the host machine (uses the built-in `node:sqlite` module — no native compilation required)
+- A Cloudflare R2 account (for object storage)
+- A reverse proxy (nginx, Caddy, etc.) to handle TLS — the server speaks plain HTTP
 
 ## Step 1 — Install dependencies
 
@@ -16,235 +15,210 @@ cd server
 npm install
 ```
 
-This installs wrangler, hono, and TypeScript locally.
+## Step 2 — Create R2 bucket(s)
 
-## Step 2 — Authenticate wrangler
+Create one R2 bucket per world you want to configure. Worlds are isolated namespaces; most setups only need one.
 
-```bash
-npx wrangler login
-```
+In the Cloudflare dashboard: **R2 → Create bucket**. Name it something like `cacher2-main`. Repeat for each additional world.
 
-This opens a browser window to authorize wrangler against your Cloudflare account. Your credentials are stored locally and reused for all subsequent wrangler commands.
+If you also want DB backups stored in R2, create a separate bucket for that (e.g. `cacher2-backups`).
 
-## Step 3 — Create the R2 bucket
+## Step 3 — Create R2 API credentials
 
-Create one bucket per world you want to configure. If you are starting with a single world called `main`:
-
-```bash
-npx wrangler r2 bucket create cacher2-main
-```
-
-Repeat for any additional worlds, using a distinct bucket name each time.
-
-Note the bucket name(s) — you will need them in Step 5.
-
-## Step 4 — Create the D1 database
-
-```bash
-npx wrangler d1 create cacher2
-```
-
-The output will include a line like:
-
-```
-database_id = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-```
-
-Copy that UUID and paste it into `wrangler.toml`, replacing `REPLACE_WITH_YOUR_D1_DATABASE_ID`:
-
-```toml
-[[d1_databases]]
-binding = "DB"
-database_name = "cacher2"
-database_id = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"   # <-- paste here
-```
-
-## Step 5 — Configure worlds
-
-Edit the `WORLDS` var in `wrangler.toml`. The value is a JSON object mapping world names to R2 bucket names. The first key is the default world.
-
-```toml
-[vars]
-WORLDS = '{"main": "cacher2-main"}'
-```
-
-For multiple worlds:
-
-```toml
-[vars]
-WORLDS = '{"main": "cacher2-main", "staging": "cacher2-staging"}'
-```
-
-World names must match `[a-zA-Z0-9]{2,14}`.
-
-## Step 6 — Create R2 API credentials
-
-The server needs credentials to generate presigned URLs for R2 — these are separate from your Cloudflare account login.
+The server needs credentials to generate presigned URLs and to upload backups.
 
 1. Go to **Cloudflare Dashboard → R2 → Manage R2 API Tokens**
 2. Click **Create API Token**
 3. Set permissions to **Object Read & Write**
-4. Under **Specify bucket(s)**, select all buckets you created in Step 3 (or leave unrestricted)
+4. Under **Specify bucket(s)**, select all buckets from Step 2 (including the backup bucket if applicable), or leave unrestricted
 5. Click **Create API Token**
 
-Save the values shown:
-- **Access Key ID** (looks like a long alphanumeric string)
+Save the three values shown:
+- **Access Key ID**
 - **Secret Access Key** (shown only once — copy it now)
-- **Account ID** (visible in the sidebar of the Cloudflare dashboard, or in the token creation page)
+- **Account ID** (visible in the Cloudflare dashboard sidebar)
 
-## Step 7 — Set secrets
+## Step 4 — Generate the root API key
 
-Set each secret using wrangler. You will be prompted to paste the value:
-
-```bash
-npx wrangler secret put ROOT_API_KEY
-npx wrangler secret put R2_ACCOUNT_ID
-npx wrangler secret put R2_ACCESS_KEY_ID
-npx wrangler secret put R2_SECRET_ACCESS_KEY
-```
-
-### Generating the root API key
-
-The root key is level 4 and is the only credential that can create other users. It is never stored in the database — only in Cloudflare Secrets.
-
-Generate one manually using this format: a `4-` prefix followed by exactly 12 random alphanumeric characters (`[A-Za-z0-9]`). For example:
+The root key is level 4 and is the only credential that can create other users. Generate one now:
 
 ```bash
 echo "4-$(LC_ALL=C tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 12)"
 ```
 
-Enter the output as the value for `ROOT_API_KEY`. Keep a copy somewhere safe — it cannot be retrieved after this point. If lost, generate a new one and re-run `wrangler secret put ROOT_API_KEY`.
+Keep a copy somewhere safe. If lost, generate a new one and update `config.toml`.
 
-**For `R2_ACCOUNT_ID`:** enter your Cloudflare Account ID (32-character hex string visible in the dashboard URL or the R2 overview page).
-
-**For `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY`:** enter the values from Step 6.
-
-## Step 8 — Apply the database schema
-
-Run the schema against the remote (production) D1 instance:
+## Step 5 — Create config.toml
 
 ```bash
-npm run db:init:remote
+cp config.example.toml config.toml
 ```
 
-This is equivalent to `wrangler d1 execute cacher2 --remote --file=schema.sql`. It creates the `items` and `users` tables. The command is safe to re-run (all statements use `CREATE TABLE IF NOT EXISTS`).
+Edit `config.toml`:
 
-## Step 9 — Deploy
+```toml
+port = 3000
+db_path = "/var/lib/cacher/cacher.db"
+root_api_key = "4-xxxxxxxxxxxx"        # from Step 4
+
+backup_bucket = "cacher2-backups"      # omit to disable backups
+
+[r2]
+account_id = "..."                     # from Step 3
+access_key_id = "..."
+secret_access_key = "..."
+
+[worlds]
+main = "cacher2-main"                  # world name = R2 bucket name from Step 2
+```
+
+For multiple worlds, add more entries under `[worlds]`. The first entry is the default world for root-level operations.
+
+`config.toml` is in `.gitignore` — do not commit it.
+
+The database file and its WAL sidecars (`-wal`, `-shm`) must be on a persistent volume. Make sure the directory exists and is writable:
 
 ```bash
-npm run deploy
+mkdir -p /var/lib/cacher
 ```
 
-Wrangler will bundle the TypeScript, upload it to Cloudflare, and print the Worker URL:
+## Step 6 — Start the server
 
+```bash
+npm start
 ```
-Published cacher2 (x.xx sec)
-  https://cacher2.<your-subdomain>.workers.dev
+
+The server logs its port and configured worlds on startup. To enable per-request and per-action debug logging:
+
+```bash
+npm run start:debug
 ```
 
-Note this URL — it is your `CACHER2_API_URL` for PHP clients.
+## Step 7 — Run as a systemd service (production)
 
-## Step 10 — Configure PHP clients
+Create `/etc/systemd/system/cacher2.service`:
 
-On each machine running the cacher2 PHP client, set these two constants (e.g. in your `.dev` file or environment):
+```ini
+[Unit]
+Description=cacher2 server
+After=network.target
+
+[Service]
+Type=simple
+User=cacher
+WorkingDirectory=/opt/cacher2/server
+ExecStart=/usr/bin/node /opt/cacher2/server/node_modules/.bin/tsx src/index.ts
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Then:
+
+```bash
+systemctl daemon-reload
+systemctl enable --now cacher2
+journalctl -u cacher2 -f   # follow logs
+```
+
+## Step 8 — Reverse proxy (TLS)
+
+The server listens on plain HTTP. Put it behind nginx or Caddy for TLS.
+
+**Caddy** (`/etc/caddy/Caddyfile`):
+```
+cacher2.example.com {
+    reverse_proxy localhost:3000
+}
+```
+
+**nginx** (snippet):
+```nginx
+server {
+    listen 443 ssl;
+    server_name cacher2.example.com;
+    # ... ssl config ...
+
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_set_header X-Forwarded-For $remote_addr;
+    }
+}
+```
+
+## Step 9 — Configure PHP clients
+
+On each machine running the cacher2 PHP client, set these constants (e.g. in your `.dev` file or environment):
 
 ```php
 define('CACHER_HOME', '/path/to/local/cache');
-define('CACHER2_API_URL', 'https://cacher2.<your-subdomain>.workers.dev');
-define('CACHER2_API_KEY', '4-<your-root-key>');   // or a lower-level key from Step 11
+define('CACHER2_API_URL', 'https://cacher2.example.com');
+define('CACHER2_API_KEY', '4-<your-root-key>');   // or a lower-level key from Step 10
 ```
 
-Remove any old `CACHER_DB_*` and `CACHER_R2_*` constants — they are no longer used.
+## Step 10 — Create non-root users (recommended)
 
-## Step 11 — Create non-root users (recommended)
-
-It is best practice not to distribute the root key to regular clients. Use the root key once to create purpose-specific keys:
+It is best practice not to distribute the root key to regular clients. Use it once to create purpose-specific keys:
 
 ```bash
-# Create a read/write key for CI systems
+# Read/write key for CI systems
 php bin/cacher2.php adduser ci-bot 2
 
-# Create a read-only key for deployment machines
+# Read-only key for deployment machines
 php bin/cacher2.php adduser deploy-node 1
 
-# Create another world's user
+# User in a specific world
 php bin/cacher2.php adduser staging-bot 2 staging
 ```
 
 Each command prints the generated API key. Distribute each key only to the system that needs it.
 
 Access levels:
-| Level | Can do |
-|-------|--------|
+
+| Level | Permissions |
+|-------|-------------|
 | 1 | pull, list items |
-| 2 | push, pull, list, delete items, clean |
-| 3 | all of level 2 + manage users (adduser/deluser/listusers within own world) |
-| 4 | root — all operations across all worlds; key lives in Cloudflare Secrets only |
+| 2 | push, pull, list, delete items |
+| 3 | level 2 + manage users (adduser/deluser/listusers within own world) |
+| 4 | root — all operations across all worlds |
 
-## Migrating an existing MySQL remote index
+## Backups
 
-If you have an existing cacher2 installation with items in a MySQL remote index, use the temporary migration tool to copy the index records into D1. The R2 bucket content does not need to change — only the index is migrated.
+If `backup_bucket` is set in `config.toml`, the server automatically takes a hot SQLite snapshot once per hour and uploads it to R2 as `cacher-YYYY-MM-DDTHH-MM-SS.db`. The snapshot uses SQLite's online backup API, so it is safe to run while the server is handling requests.
 
-```bash
-# Dry run first — counts rows without uploading anything
-php bin/migrate-remote-db.php --dry-run
+Backups accumulate — set up an R2 lifecycle rule on the backup bucket to expire objects older than your desired retention period.
 
-# Migrate into the default world
-php bin/migrate-remote-db.php
-
-# Or specify a world explicitly
-php bin/migrate-remote-db.php --world=main
-```
-
-The tool requires `CACHER_DB_DSN`, `CACHER_DB_USER`, and `CACHER_DB_PASS` to still be defined alongside `CACHER2_API_URL` and `CACHER2_API_KEY` (root key required). The migration is idempotent — safe to re-run.
-
-After confirming the migration looks correct, delete the temporary files:
-
-```bash
-rm bin/migrate-remote-db.php
-rm server/src/routes/admin.ts
-```
-
-And remove the admin route registration from `server/src/index.ts`:
-
-```diff
--import { adminRouter } from './routes/admin';
- ...
--app.route('/admin', adminRouter);
-```
-
-Then redeploy: `npm run deploy`.
+To restore: download any `.db` file from the backup bucket and place it at `db_path` (stop the server first).
 
 ## Local development
 
-To run the Worker locally against a local D1 instance:
-
 ```bash
-# Apply schema to local D1
-npm run db:init
-
-# Start local dev server (auto-reloads on changes)
-npm run dev
+cp config.example.toml config.toml
+# fill in config.toml with dev credentials
+npm start
+# or for verbose logging:
+npm run start:debug
 ```
 
-The local server runs at `http://localhost:8787`. Secrets defined in `.dev.vars` (a file at `server/.dev.vars`, gitignored) are used in local mode:
+The database file is created automatically at `db_path` on first run. Schema is applied automatically — no separate migration step needed.
 
-```ini
-ROOT_API_KEY=4-YourLocalRootKey
-R2_ACCOUNT_ID=your-account-id
-R2_ACCESS_KEY_ID=your-access-key-id
-R2_SECRET_ACCESS_KEY=your-secret-access-key
-```
-
-Note: in local dev mode, R2 presigned URLs still point at the real R2 endpoint, so R2 credentials must be real even for local testing.
-
-## Verifying the deployment
+To type-check without running:
 
 ```bash
-# Should return {"error":"invalid key format"} — confirms the Worker is live
-curl https://cacher2.<your-subdomain>.workers.dev/items
+npm run typecheck
+```
 
-# Should return a list of items (empty on a fresh install)
-curl -H "Authorization: Bearer 4-<your-root-key>" \
-  https://cacher2.<your-subdomain>.workers.dev/items
+## Verifying the server
+
+```bash
+# Should return {"error":"invalid key format"} — confirms the server is reachable
+curl https://cacher2.example.com/items
+
+# Should return {"items":[]} on a fresh install
+curl -X POST https://cacher2.example.com/items/query \
+  -H "Authorization: Bearer 4-<your-root-key>" \
+  -H "Content-Type: application/json" \
+  -d '{"keys":[]}'
 ```

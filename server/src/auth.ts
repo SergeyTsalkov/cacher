@@ -1,5 +1,8 @@
 import { createMiddleware } from 'hono/factory';
-import type { Env } from './index';
+import { randomBytes } from 'crypto';
+import { config } from './config';
+import { db } from './db';
+import { log } from './logger';
 
 export interface AuthContext {
   level: number;
@@ -16,55 +19,52 @@ export function parseKeyFormat(key: string): { level: number; token: string } | 
 
 export function generateApiKey(level: 1 | 2 | 3): string {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  const bytes = crypto.getRandomValues(new Uint8Array(12));
+  const bytes = randomBytes(12);
   const token = Array.from(bytes).map(b => chars[b % chars.length]).join('');
   return `${level}-${token}`;
-}
-
-export function getWorlds(env: Env): Record<string, string> {
-  return JSON.parse(env.WORLDS) as Record<string, string>;
-}
-
-export function getDefaultWorld(env: Env): string {
-  const worlds = getWorlds(env);
-  const first = Object.keys(worlds)[0];
-  if (!first) throw new Error('No worlds configured in WORLDS');
-  return first;
 }
 
 type Variables = { auth: AuthContext };
 
 export const authMiddleware = (minLevel: number) =>
-  createMiddleware<{ Bindings: Env; Variables: Variables }>(async (c, next) => {
+  createMiddleware<{ Variables: Variables }>(async (c, next) => {
     const header = c.req.header('Authorization') ?? '';
     const key = header.replace(/^Bearer\s+/, '');
+    const ip = c.req.header('X-Forwarded-For') ?? 'unknown';
 
     const parsed = parseKeyFormat(key);
-    if (!parsed) return c.json({ error: 'invalid key format' }, 401);
+    if (!parsed) {
+      log.warn(`auth: invalid key format from ${ip}`);
+      return c.json({ error: 'invalid key format' }, 401);
+    }
 
     let auth: AuthContext;
-    const worlds = getWorlds(c.env);
 
     if (parsed.level === 4) {
-      if (key !== c.env.ROOT_API_KEY) {
+      if (key !== config.root_api_key) {
+        log.warn(`auth: invalid root key from ${ip}`);
         return c.json({ error: 'unauthorized' }, 401);
       }
-      const defaultWorld = Object.keys(worlds)[0];
+      const defaultWorld = Object.keys(config.worlds)[0];
       if (!defaultWorld) return c.json({ error: 'no worlds configured' }, 500);
       auth = { level: 4, name: 'root', world: defaultWorld, key };
     } else {
-      const row = await c.env.DB.prepare(
+      const row = db.prepare(
         'SELECT name, level, world FROM users WHERE api_key = ?'
-      ).bind(key).first<{ name: string; level: number; world: string }>();
+      ).get(key) as { name: string; level: number; world: string } | undefined;
 
-      if (!row) return c.json({ error: 'unauthorized' }, 401);
-      if (!worlds[row.world]) {
+      if (!row) {
+        log.warn(`auth: unknown api key from ${ip}`);
+        return c.json({ error: 'unauthorized' }, 401);
+      }
+      if (!config.worlds[row.world]) {
         return c.json({ error: `world '${row.world}' is no longer configured` }, 403);
       }
       auth = { level: row.level, name: row.name, world: row.world, key };
     }
 
     if (auth.level < minLevel) {
+      log.warn(`auth: ${auth.name} (level ${auth.level}) needs level ${minLevel} for ${c.req.method} ${c.req.path}`);
       return c.json({ error: 'insufficient access level' }, 403);
     }
 

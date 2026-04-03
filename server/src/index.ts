@@ -1,46 +1,41 @@
 import { Hono } from 'hono';
+import { serve } from '@hono/node-server';
 import { itemsRouter } from './routes/items';
 import { pushRouter } from './routes/push';
 import { pullRouter } from './routes/pull';
 import { usersRouter } from './routes/users';
-import { adminRouter } from './routes/admin'; // TODO: delete after migration
-import { getWorlds } from './auth';
+import { config } from './config';
+import { log } from './logger';
+import { startScheduler } from './scheduler';
 import type { AuthContext } from './auth';
-import type { Workflow } from 'cloudflare:workers';
-
-export { CleanupWorkflow } from './cleanup';
-
-export interface Env {
-  DB: D1Database;
-  ROOT_API_KEY: string;
-  R2_ACCOUNT_ID: string;
-  R2_ACCESS_KEY_ID: string;
-  R2_SECRET_ACCESS_KEY: string;
-  WORLDS: string; // JSON: {"worldName": "bucketName"}
-  CLEANUP_WORKFLOW: Workflow;
-}
 
 type Variables = { auth: AuthContext };
 
-const app = new Hono<{ Bindings: Env; Variables: Variables }>();
+const app = new Hono<{ Variables: Variables }>();
+
+app.use('*', async (c, next) => {
+  log.debug(`→ ${c.req.method} ${c.req.path}`);
+  await next();
+  log.debug(`← ${c.res.status}`);
+});
 
 app.route('/items', itemsRouter);
 app.route('/push', pushRouter);
 app.route('/pull', pullRouter);
 app.route('/users', usersRouter);
-app.route('/admin', adminRouter); // TODO: delete after migration
 
 app.notFound(c => c.json({ error: 'not found' }, 404));
 app.onError((err, c) => {
-  console.error(err);
+  log.error(`unhandled: ${err}`);
   return c.json({ error: 'internal server error' }, 500);
 });
 
-async function scheduled(_event: ScheduledEvent, env: Env, _ctx: ExecutionContext) {
-  const worlds = getWorlds(env);
-  for (const world of Object.keys(worlds)) {
-    await env.CLEANUP_WORKFLOW.create({ params: { world } });
+serve({ fetch: app.fetch, port: config.port }, () => {
+  log.info(`server started on port ${config.port}`);
+  log.info(`worlds: ${Object.keys(config.worlds).join(', ')}`);
+  if (config.backup_bucket) {
+    log.info(`backups: enabled → ${config.backup_bucket}`);
   }
-}
+});
 
-export default { fetch: app.fetch.bind(app), scheduled };
+startScheduler();

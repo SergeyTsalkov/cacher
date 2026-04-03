@@ -8,5 +8,5 @@ CLAUDE.md
 
 # Server
 /server/node_modules/
-/server/.wrangler/
-/server/.dev.vars
+/server/config.toml
+/server/cacher.db*

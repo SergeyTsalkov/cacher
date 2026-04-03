@@ -1,15 +1,16 @@
 import { Hono } from 'hono';
 import { authMiddleware } from '../auth';
 import { r2ConfigForWorld, r2DeleteObject, itemKeyToObjectKey } from '../r2';
-import { versionCompare, latestVersion } from '../version';
-import type { Env } from '../index';
+import { versionCompare } from '../version';
+import { db } from '../db';
+import { log } from '../logger';
 import type { AuthContext } from '../auth';
 
 type Variables = { auth: AuthContext };
 
-export const itemsRouter = new Hono<{ Bindings: Env; Variables: Variables }>();
+export const itemsRouter = new Hono<{ Variables: Variables }>();
 
-// POST /items/query — fetch latest version for a set of keys (exact or wildcard with *)
+// POST /items/query — latest version for a set of keys (exact or * wildcard)
 itemsRouter.post('/query', authMiddleware(1), async (c) => {
   const auth = c.get('auth');
   const body = await c.req.json<{ keys: string[] }>();
@@ -44,9 +45,10 @@ itemsRouter.post('/query', authMiddleware(1), async (c) => {
     sql += ` AND (${conditions.join(' OR ')})`;
   }
 
-  const { results: rows } = await c.env.DB.prepare(sql).bind(...bindings).all<ItemRow>();
+  log.debug(`items/query: world=${auth.world} keys=${JSON.stringify(filtered)}`);
 
-  // Pick the latest version per key using proper version comparison
+  const rows = db.prepare(sql).all(...bindings) as ItemRow[];
+
   const byKey = new Map<string, ItemRow>();
   for (const row of rows) {
     const current = byKey.get(row.key);
@@ -64,9 +66,11 @@ itemsRouter.get('/:key', authMiddleware(1), async (c) => {
   const auth = c.get('auth');
   const key = decodeURIComponent(c.req.param('key'));
 
-  const { results } = await c.env.DB.prepare(
+  log.debug(`items/get: world=${auth.world} key=${key}`);
+
+  const results = db.prepare(
     `SELECT version, created_at FROM items WHERE world = ? AND key = ?`
-  ).bind(auth.world, key).all<{ version: string; created_at: number }>();
+  ).all(auth.world, key) as { version: string; created_at: number }[];
 
   if (results.length === 0) {
     return c.json({ error: 'not found' }, 404);
@@ -82,21 +86,19 @@ itemsRouter.delete('/:key/:version', authMiddleware(2), async (c) => {
   const key = decodeURIComponent(c.req.param('key'));
   const version = decodeURIComponent(c.req.param('version'));
 
-  const existing = await c.env.DB.prepare(
+  log.debug(`items/delete: world=${auth.world} key=${key} version=${version}`);
+
+  const existing = db.prepare(
     `SELECT 1 FROM items WHERE world = ? AND key = ? AND version = ?`
-  ).bind(auth.world, key, version).first();
+  ).get(auth.world, key, version);
 
   if (!existing) {
     return c.json({ error: 'not found' }, 404);
   }
 
-  const objectKey = itemKeyToObjectKey(key, version);
-  const r2cfg = r2ConfigForWorld(c.env, auth.world);
-  await r2DeleteObject(r2cfg, objectKey);
-
-  await c.env.DB.prepare(
-    `DELETE FROM items WHERE world = ? AND key = ? AND version = ?`
-  ).bind(auth.world, key, version).run();
+  const r2cfg = r2ConfigForWorld(auth.world);
+  await r2DeleteObject(r2cfg, itemKeyToObjectKey(key, version));
+  db.prepare(`DELETE FROM items WHERE world = ? AND key = ? AND version = ?`).run(auth.world, key, version);
 
   return c.json({ ok: true });
 });

@@ -3,19 +3,20 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
-    "db:init": "wrangler d1 execute cacher2 --file=schema.sql",
-    "db:init:remote": "wrangler d1 execute cacher2 --remote --file=schema.sql"
+    "start": "tsx src/index.ts",
+    "start:debug": "tsx src/index.ts --debug",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.0.0",
-    "@aws-sdk/s3-request-presigner": "^3.0.0"
+    "@aws-sdk/s3-request-presigner": "^3.0.0",
+    "@hono/node-server": "^1.0.0",
+    "hono": "^4.0.0",
+    "smol-toml": "^1.0.0",
+    "tsx": "^4.0.0"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.0.0",
-    "hono": "^4.0.0",
-    "typescript": "^5.0.0",
-    "wrangler": "^4.79.0"
+    "@types/node": "^22.0.0",
+    "typescript": "^5.0.0"
   }
 }

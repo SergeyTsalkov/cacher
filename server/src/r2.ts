@@ -1,6 +1,13 @@
-import { S3Client, PutObjectCommand, GetObjectCommand, HeadObjectCommand, DeleteObjectCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
+import {
+  S3Client,
+  PutObjectCommand,
+  GetObjectCommand,
+  HeadObjectCommand,
+  DeleteObjectCommand,
+  ListObjectsV2Command,
+} from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import type { Env } from './index';
+import { config } from './config';
 
 export interface R2Config {
   client: S3Client;
@@ -18,16 +25,15 @@ export function objectKeyToItemKey(objectKey: string): { key: string; version: s
   return { key: m[1].replace(/\//g, ':'), version: m[2] };
 }
 
-export function r2ConfigForWorld(env: Env, world: string): R2Config {
-  const worlds = JSON.parse(env.WORLDS) as Record<string, string>;
-  const bucket = worlds[world];
+export function r2ConfigForWorld(world: string): R2Config {
+  const bucket = config.worlds[world];
   if (!bucket) throw new Error(`Unknown world: ${world}`);
   const client = new S3Client({
     region: 'auto',
-    endpoint: `https://${env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+    endpoint: `https://${config.r2.account_id}.r2.cloudflarestorage.com`,
     credentials: {
-      accessKeyId: env.R2_ACCESS_KEY_ID,
-      secretAccessKey: env.R2_SECRET_ACCESS_KEY,
+      accessKeyId: config.r2.access_key_id,
+      secretAccessKey: config.r2.secret_access_key,
     },
   });
   return { client, bucket };
@@ -54,7 +60,6 @@ export async function r2DeleteObject(cfg: R2Config, objectKey: string): Promise<
   await cfg.client.send(new DeleteObjectCommand({ Bucket: cfg.bucket, Key: objectKey }));
 }
 
-// Lists up to 200 objects per page to stay within D1's parameter limit during orphan checks.
 export async function r2ListObjects(cfg: R2Config, continuationToken?: string): Promise<{ keys: string[]; nextToken?: string }> {
   const resp = await cfg.client.send(new ListObjectsV2Command({
     Bucket: cfg.bucket,
