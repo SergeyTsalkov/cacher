@@ -6,7 +6,6 @@ This document covers setting up the cacher2 server from scratch. The server is a
 
 - Node.js 24+ on the host machine (uses the built-in `node:sqlite` module — no native compilation required)
 - A Cloudflare R2 account (for object storage)
-- A reverse proxy (nginx, Caddy, etc.) to handle TLS — the server speaks plain HTTP
 
 ## Step 1 — Install dependencies
 
@@ -123,18 +122,32 @@ systemctl enable --now cacher2
 journalctl -u cacher2 -f   # follow logs
 ```
 
-## Step 8 — Reverse proxy (TLS)
+## Step 8 — TLS
 
-The server listens on plain HTTP. Put it behind nginx or Caddy for TLS.
+The server can terminate TLS directly or sit behind a reverse proxy — your choice.
 
-**Caddy** (`/etc/caddy/Caddyfile`):
+**Option A — direct TLS** (add to `config.toml`):
+
+```toml
+[tls]
+cert = "/etc/ssl/certs/cacher.crt"
+key  = "/etc/ssl/private/cacher.key"
+```
+
+Certificates from Let's Encrypt, your CA, or self-signed all work. Omit the `[tls]` section entirely to serve plain HTTP.
+
+**Option B — reverse proxy**
+
+Leave `[tls]` out of `config.toml` and front the server with nginx or Caddy.
+
+*Caddy* (`/etc/caddy/Caddyfile`):
 ```
 cacher2.example.com {
     reverse_proxy localhost:3000
 }
 ```
 
-**nginx** (snippet):
+*nginx* (snippet):
 ```nginx
 server {
     listen 443 ssl;

@@ -7,6 +7,10 @@ interface ConfigFile {
   db_path?: string;
   root_api_key: string;
   backup_bucket?: string;
+  tls?: {
+    cert: string;
+    key: string;
+  };
   r2: {
     account_id: string;
     access_key_id: string;
@@ -55,6 +59,7 @@ function loadConfig() {
     db_path:       data.db_path ?? './cacher.db',
     root_api_key:  data.root_api_key,
     backup_bucket: data.backup_bucket,
+    tls:           data.tls,
     r2:            data.r2,
     worlds:        data.worlds,
     debug:         process.argv.includes('--debug'),

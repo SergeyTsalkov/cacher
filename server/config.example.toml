@@ -11,6 +11,11 @@ root_api_key = "4-xxxxxxxxxxxx"
 # R2 bucket for DB backups — omit or comment out to disable backups
 # backup_bucket = "cacher-backups"
 
+# TLS — omit to serve plain HTTP (e.g. when terminating TLS at a reverse proxy)
+# [tls]
+# cert = "/etc/ssl/certs/cacher.crt"
+# key  = "/etc/ssl/private/cacher.key"
+
 [r2]
 account_id = ""
 access_key_id = ""
