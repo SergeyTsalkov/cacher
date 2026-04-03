@@ -6,10 +6,7 @@ test.php
 /cacher.txt
 CLAUDE.md
 
-# Server
-/server/node_modules/
-
-# goserver
+# server
 cacher.db*
 config.toml
-/goserver/goserver
+/c2server/c2server

@@ -1,8 +1,8 @@
 package main
 
 import (
-	"cacher/goserver/internal"
-	"cacher/goserver/routes"
+	"cacher/c2server/internal"
+	"cacher/c2server/routes"
 	"flag"
 	"fmt"
 	"os"

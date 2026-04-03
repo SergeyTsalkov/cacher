@@ -1,4 +1,4 @@
-module cacher/goserver
+module cacher/c2server
 
 go 1.26.1
 

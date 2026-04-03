@@ -1,7 +1,7 @@
 package routes
 
 import (
-	"cacher/goserver/internal"
+	"cacher/c2server/internal"
 	"fmt"
 	"sort"
 	"strings"

@@ -1,7 +1,7 @@
 package routes
 
 import (
-	"cacher/goserver/internal"
+	"cacher/c2server/internal"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
