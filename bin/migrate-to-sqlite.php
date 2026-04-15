@@ -20,9 +20,6 @@ require_once $_composer_autoload_path ?? __DIR__ . '/../vendor/autoload.php';
 $opts = getopt('', ['sqlite:', 'world:', 'dry-run']);
 $dryRun = isset($opts['dry-run']);
 
-$devFile = __DIR__ . '/../.dev';
-if (file_exists($devFile)) require $devFile;
-
 foreach (['CACHER_DB_DSN', 'CACHER_DB_USER', 'CACHER_DB_PASS'] as $c) {
   if (!defined($c)) {
     echo "Error: $c is not defined — set it in .dev\n";
@@ -76,7 +73,7 @@ $sqlite->setAttribute(\PDO::ATTR_ERRMODE, \PDO::ERRMODE_EXCEPTION);
 $sqlite->exec('PRAGMA journal_mode = WAL');
 
 // Apply schema (all statements are CREATE ... IF NOT EXISTS, safe to re-run)
-$schema = file_get_contents(__DIR__ . '/../server/schema.sql');
+$schema = file_get_contents(__DIR__ . '/../c2server/internal/schema.sql');
 $sqlite->exec($schema);
 
 // Items
