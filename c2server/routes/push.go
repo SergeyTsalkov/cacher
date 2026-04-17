@@ -8,7 +8,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
-var validItemKey = regexp.MustCompile(`^[\w\-:]+$`)
+var validItemKey = regexp.MustCompile(`^[\w\.\-:]+$`)
 
 func SetupPush(app *fiber.App) {
 	g := app.Group("/push")
