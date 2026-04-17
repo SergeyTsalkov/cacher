@@ -467,7 +467,7 @@ class Cacher {
   }
 
   private function item2path(string $key) {
-    if (preg_match('/[^\w\-:]/i', $key)) {
+    if (preg_match('/[^\w\-\.:]/i', $key)) {
       throw new Exception("cache key contains invalid characters: $key");
     }
 
