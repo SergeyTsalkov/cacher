@@ -48,6 +48,7 @@ func main() {
 
 	app := fiber.New(fiber.Config{
 		DisableStartupMessage: true,
+		UnescapePath:          true,
 	})
 
 	app.Use(func(c *fiber.Ctx) error {
