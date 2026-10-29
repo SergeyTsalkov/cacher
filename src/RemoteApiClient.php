@@ -74,12 +74,26 @@ class RemoteApiClient {
   }
 
   // Returns ['upload_url' => ..., 'object_key' => ...]
-  function pushInit(string $key, string $version): array {
-    return $this->post('push/init', ['key' => $key, 'version' => $version]);
+  // For large sizes, servers that support it also return
+  // 'multipart' => ['upload_id' => ..., 'part_size' => ..., 'part_urls' => [...]]
+  function pushInit(string $key, string $version, ?int $size=null): array {
+    $body = ['key' => $key, 'version' => $version];
+    if ($size !== null) $body['size'] = $size;
+    return $this->post('push/init', $body);
   }
 
-  function pushConfirm(string $key, string $version): void {
-    $this->post('push/confirm', ['key' => $key, 'version' => $version]);
+  // $parts: [['part_number' => int, 'etag' => string], ...], only for multipart uploads
+  function pushConfirm(string $key, string $version, ?string $uploadId=null, array $parts=[]): void {
+    $body = ['key' => $key, 'version' => $version];
+    if ($uploadId !== null) {
+      $body['upload_id'] = $uploadId;
+      $body['parts'] = $parts;
+    }
+    $this->post('push/confirm', $body);
+  }
+
+  function pushAbort(string $key, string $version, string $uploadId): void {
+    $this->post('push/abort', ['key' => $key, 'version' => $version, 'upload_id' => $uploadId]);
   }
 
   // Returns ['key' => ..., 'version' => ..., 'created_at' => ..., 'download_url' => ..., 'object_key' => ...]

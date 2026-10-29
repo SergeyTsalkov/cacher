@@ -67,21 +67,92 @@ class Cacher {
       $lzfile = $this->path_join($lzdir, '_extract.tar.lz4');
       $this->run("tar --numeric-owner -C " . escapeshellarg($path) . " -cf - . | lz4 -q - $lzfile");
 
-      $initResult = $this->remoteApi->pushInit($key, $version);
-      $this->httpClient->put($initResult['upload_url'], [
-        'body' => fopen($lzfile, 'r'),
-        'headers' => [
-          'Content-Type' => 'application/octet-stream',
-          'Content-Length' => filesize($lzfile),
-        ],
-      ]);
+      $size = filesize($lzfile);
+      $initResult = $this->remoteApi->pushInit($key, $version, $size);
+      $multipart = $initResult['multipart'] ?? null;
+
+      if ($multipart) {
+        $uploadId = $multipart['upload_id'];
+        try {
+          $parts = $this->uploadParts($lzfile, $size, (int)$multipart['part_size'], $multipart['part_urls']);
+          $this->remoteApi->pushConfirm($key, $version, $uploadId, $parts);
+        } catch (\Throwable $e) {
+          try {
+            $this->remoteApi->pushAbort($key, $version, $uploadId);
+          } catch (\Throwable $ignored) {}
+          throw $e;
+        }
+      } else {
+        // Older servers only offer a single PUT, which S3/R2 caps at 5GB.
+        if ($size > 5 * 1024 ** 3) {
+          throw new Exception("$key is over 5GB and the server doesn't support multipart uploads");
+        }
+        $this->httpClient->put($initResult['upload_url'], [
+          'body' => fopen($lzfile, 'r'),
+          'headers' => [
+            'Content-Type' => 'application/octet-stream',
+            'Content-Length' => $size,
+          ],
+        ]);
+        $this->remoteApi->pushConfirm($key, $version);
+      }
 
     } finally {
       $this->filesystem()->remove($lzdir);
     }
 
-    $this->remoteApi->pushConfirm($key, $version);
     $this->say("Pushed $key ($version)");
+  }
+
+  // Uploads $file in parts to presigned URLs, a few at a time, retrying failed parts.
+  // Returns [['part_number' => int, 'etag' => string], ...] for pushConfirm().
+  private function uploadParts(string $file, int $size, int $partSize, array $partUrls): array {
+    $concurrency = 4;
+    $waits = [2, 5, 10];
+    $etags = [];
+    $pending = array_keys($partUrls); // 0-based indexes; part number is index + 1
+    $lastError = null;
+
+    for ($attempt = 0; $pending; $attempt++) {
+      if ($attempt > 0) {
+        if ($attempt > count($waits)) {
+          throw new Exception(sprintf("Upload failed for %d part(s): %s",
+            count($pending), $lastError?->getMessage()));
+        }
+        sleep($waits[$attempt - 1]);
+      }
+
+      $requests = function() use ($pending, $file, $size, $partSize, $partUrls) {
+        foreach ($pending as $i) {
+          $offset = $i * $partSize;
+          $length = min($partSize, $size - $offset);
+          $body = new \GuzzleHttp\Psr7\LimitStream(new \GuzzleHttp\Psr7\LazyOpenStream($file, 'r'), $length, $offset);
+          yield $i => new \GuzzleHttp\Psr7\Request('PUT', $partUrls[$i], ['Content-Length' => $length], $body);
+        }
+      };
+
+      $failed = [];
+      $pool = new \GuzzleHttp\Pool($this->httpClient, $requests(), [
+        'concurrency' => $concurrency,
+        'fulfilled' => function($response, $i) use (&$etags) {
+          $etags[$i] = $response->getHeaderLine('ETag');
+        },
+        'rejected' => function($reason, $i) use (&$failed, &$lastError) {
+          $failed[] = $i;
+          $lastError = $reason;
+        },
+      ]);
+      $pool->promise()->wait();
+      $pending = $failed;
+    }
+
+    ksort($etags);
+    $parts = [];
+    foreach ($etags as $i => $etag) {
+      if ($etag === '') throw new Exception("No ETag returned for part " . ($i + 1));
+      $parts[] = ['part_number' => $i + 1, 'etag' => $etag];
+    }
+    return $parts;
   }
 
   function pull(string $key) {
